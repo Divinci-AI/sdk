@@ -30,19 +30,24 @@ paragraph is the answer.
 
 What you *can* rely on, without the source:
 
-- **Releases from 2026-08-19 onward carry [npm provenance](https://docs.npmjs.com/generating-provenance-statements).**
-  Publishing moved to a GitHub Actions workflow using
-  [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC), which
-  records a signed attestation in the public
-  [Sigstore transparency log](https://search.sigstore.dev) — so you can verify a
-  tarball was built by that workflow, from that commit, without trusting us.
+- **Releases are published by a GitHub Actions workflow using
+  [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) (OIDC)**, not
+  by a person with a long-lived npm token. Nobody holds a credential that can
+  publish these packages.
 
-  Being precise about what that does *not* cover: versions published before that
-  date were released manually and carry **no** attestation. `npm view
-  @divinci-ai/<pkg> dist.attestations` returns nothing for them, and no
-  retroactive fix is possible — provenance is generated at publish time. Check
-  the version you actually depend on rather than assuming the guarantee is
-  uniform.
+  **They do NOT carry [npm provenance](https://docs.npmjs.com/generating-provenance-statements),
+  and cannot today.** npm only accepts a provenance attestation when the source
+  repository is public, and this SDK is built in a private monorepo — the
+  registry rejects the publish outright with
+  `Unsupported GitHub Actions source repository visibility: "private"`. So
+  there is no cryptographic attestation you can check, and `npm view
+  @divinci-ai/<pkg> dist.attestations` is empty for every version. Versions
+  published before 2026-08-19 were released manually and have none either.
+
+  We are stating this plainly rather than leaving it unsaid: if verifiable
+  provenance matters to your supply chain, these packages do not offer it yet.
+  Making the source public would, which is the tracked path.
+
 - **`@divinci-ai/trustbench-verifier` is MIT and dependency-free by design** —
   it exists so TrustBench run manifests can be verified offline, by someone who
   does not trust Divinci. Its source belongs in the open; opening it here is
