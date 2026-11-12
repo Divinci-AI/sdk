@@ -31,6 +31,9 @@
       "name": "admin/rate-limit-requests"
     },
     {
+      "name": "admin/workspace-rate-limits"
+    },
+    {
       "name": "audio-transcripts"
     },
     {
@@ -393,12 +396,26 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "castShallowObject",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "whitelabelId": {
+                    "type": "string"
+                  },
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "agentName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "whitelabelId",
+                  "sessionId"
+                ]
               }
             }
           }
@@ -442,12 +459,22 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "castShallowObject",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "whitelabelId": {
+                    "type": "string"
+                  },
+                  "bulkUpsert": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "whitelabelId"
+                ]
               }
             }
           }
@@ -467,6 +494,30 @@
             "name": "transcriptId",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "whitelabelId",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -581,6 +632,27 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string"
+                  },
+                  "id": {},
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -598,7 +670,64 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "dateFrom",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dateTo",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "A page of transcripts for the workspace the API key is scoped to.",
@@ -797,6 +926,22 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -1020,7 +1165,40 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "countsMode",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "A bare ARRAY of file records — not an envelope, and not paginated.",
@@ -1543,7 +1721,10 @@
                     "type": "string"
                   },
                   "status": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "completed"
+                    ]
                   },
                   "title": {
                     "type": "string"
@@ -1581,6 +1762,14 @@
             "name": "fileId",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "ragVectorId",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -1630,6 +1819,22 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -2131,7 +2336,48 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "collectionId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fileId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "topK",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -2780,7 +3026,16 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "A bare ARRAY of release documents — not an envelope. Every release by default; optional `?limit=` (1-1000) and `?skip=` page it, ordered by `_id`.",
@@ -3069,19 +3324,7 @@
         "x-required-permissions": [
           "release:write"
         ],
-        "x-rate-limit-feature": "releases",
-        "requestBody": {
-          "required": true,
-          "x-schema-source": "jsonBody",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
-          }
-        }
+        "x-rate-limit-feature": "releases"
       }
     },
     "/api/v1/releases/{releaseId}/deprecate": {
@@ -3405,19 +3648,18 @@
         "x-rate-limit-feature": "config",
         "requestBody": {
           "required": true,
-          "x-schema-source": "CastedBusBoy",
+          "x-schema-source": "castShallowObject",
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "picture": {
-                    "type": "string",
-                    "format": "binary"
+                  "title": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "picture"
+                  "title"
                 ]
               }
             }
@@ -3463,19 +3705,18 @@
         "x-rate-limit-feature": "config",
         "requestBody": {
           "required": true,
-          "x-schema-source": "CastedBusBoy",
+          "x-schema-source": "castShallowObject",
           "content": {
-            "multipart/form-data": {
+            "application/json": {
               "schema": {
                 "type": "object",
                 "properties": {
-                  "picture": {
-                    "type": "string",
-                    "format": "binary"
+                  "description": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "picture"
+                  "description"
                 ]
               }
             }
@@ -4369,7 +4610,19 @@
         "x-required-permissions": [
           "connector:write"
         ],
-        "x-rate-limit-feature": "connectors"
+        "x-rate-limit-feature": "connectors",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors/{provider}/disconnect": {
@@ -4454,7 +4707,19 @@
         "x-required-permissions": [
           "connector:write"
         ],
-        "x-rate-limit-feature": "connectors"
+        "x-rate-limit-feature": "connectors",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors/wordpress/discover": {
@@ -4492,7 +4757,24 @@
         "x-required-permissions": [
           "connector:write"
         ],
-        "x-rate-limit-feature": "connectors"
+        "x-rate-limit-feature": "connectors",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "siteUrl": {
+                    "type": "string"
+                  },
+                  "auth": {}
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors/wordpress/start": {
@@ -4530,7 +4812,19 @@
         "x-required-permissions": [
           "connector:write"
         ],
-        "x-rate-limit-feature": "connectors"
+        "x-rate-limit-feature": "connectors",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors/stats/overview": {
@@ -4660,7 +4954,24 @@
         "x-required-permissions": [
           "connector:write"
         ],
-        "x-rate-limit-feature": "connectors"
+        "x-rate-limit-feature": "connectors",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "providerSettings": {},
+                  "syncConfig": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/connectors/{connectionId}/sync": {
@@ -4931,7 +5242,23 @@
         "x-required-permissions": [
           "config:write"
         ],
-        "x-rate-limit-feature": "hermes-agent"
+        "x-rate-limit-feature": "hermes-agent",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lever": {},
+                  "ttlMs": {},
+                  "note": {}
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/hermes-agent/{agentId}/fleet/claims/release": {
@@ -4978,7 +5305,22 @@
         "x-required-permissions": [
           "config:write"
         ],
-        "x-rate-limit-feature": "hermes-agent"
+        "x-rate-limit-feature": "hermes-agent",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "lever": {},
+                  "fence": {}
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/html-pages": {
@@ -4995,7 +5337,32 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "ragStatus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "urlHost",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5071,7 +5438,16 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5385,7 +5761,26 @@
         "x-required-permissions": [
           "notification:write"
         ],
-        "x-rate-limit-feature": "notifications"
+        "x-rate-limit-feature": "notifications",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "isRead": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "isRead"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/threads": {
@@ -5402,7 +5797,24 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "releaseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5487,7 +5899,56 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "audioTranscriptId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "diarizerTool",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "speakerLabel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "merging",
+                "pending",
+                "running",
+                "succeeded",
+                "canceled",
+                "failed"
+              ]
+            }
+          },
+          {
+            "name": "voicePrinterToolId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5525,7 +5986,32 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "includeReleases",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "includeResources",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5561,7 +6047,24 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "conflictResolution",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "dryRun",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -5845,7 +6348,19 @@
         "x-required-permissions": [
           "transcript:write"
         ],
-        "x-rate-limit-feature": "chat"
+        "x-rate-limit-feature": "chat",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/training-data/estimate-cost": {
@@ -5886,12 +6401,28 @@
         "x-rate-limit-feature": "training-data",
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "sourceType": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  },
+                  "llmModel": {
+                    "type": "string"
+                  },
+                  "qaPerChunk": {
+                    "type": "number"
+                  },
+                  "chunkSize": {
+                    "type": "number"
+                  }
+                }
               }
             }
           }
@@ -6030,7 +6561,48 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "sourceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sourceType",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -6167,6 +6739,38 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "approved",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "minQuality",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -6531,13 +7135,21 @@
                     "type": "string"
                   },
                   "retrievalParity": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "chat"
+                    ]
                   },
                   "confirmCost": {
                     "type": "boolean"
                   },
                   "batchMode": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "auto",
+                      "force",
+                      "never"
+                    ]
                   },
                   "batchThreshold": {
                     "type": "number"
@@ -6577,6 +7189,14 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -7117,6 +7737,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "includeAnswers",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -7186,32 +7814,40 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "targetName": {
+                  "name": {
                     "type": "string"
                   },
-                  "targetDescription": {
+                  "description": {
                     "type": "string"
                   },
-                  "sourceNote": {
+                  "url": {
                     "type": "string"
                   },
-                  "answers": {
-                    "type": "array",
-                    "items": {}
-                  },
-                  "judgeModelOverride": {
+                  "model": {
                     "type": "string"
                   },
-                  "concurrency": {
+                  "apiKey": {
+                    "type": "string"
+                  },
+                  "timeoutMs": {
                     "type": "number"
                   },
-                  "confirmCost": {
-                    "type": "boolean"
+                  "rpmCap": {
+                    "type": "number"
+                  },
+                  "acknowledgeTerms": {
+                    "type": "string"
+                  },
+                  "termsVersion": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "targetName",
-                  "answers"
+                  "name",
+                  "url",
+                  "model",
+                  "acknowledgeTerms",
+                  "termsVersion"
                 ],
                 "additionalProperties": false
               }
@@ -7356,32 +7992,15 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "targetName": {
-                    "type": "string"
-                  },
-                  "targetDescription": {
-                    "type": "string"
-                  },
-                  "sourceNote": {
-                    "type": "string"
-                  },
-                  "answers": {
-                    "type": "array",
-                    "items": {}
-                  },
-                  "judgeModelOverride": {
-                    "type": "string"
-                  },
-                  "concurrency": {
-                    "type": "number"
-                  },
-                  "confirmCost": {
+                  "allowed": {
                     "type": "boolean"
+                  },
+                  "note": {
+                    "type": "string"
                   }
                 },
                 "required": [
-                  "targetName",
-                  "answers"
+                  "allowed"
                 ],
                 "additionalProperties": false
               }
@@ -7488,16 +8107,10 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "targetName": {
+                  "targetId": {
                     "type": "string"
                   },
-                  "targetDescription": {
-                    "type": "string"
-                  },
-                  "sourceNote": {
-                    "type": "string"
-                  },
-                  "answers": {
+                  "testIds": {
                     "type": "array",
                     "items": {}
                   },
@@ -7507,13 +8120,15 @@
                   "concurrency": {
                     "type": "number"
                   },
+                  "askConcurrency": {
+                    "type": "number"
+                  },
                   "confirmCost": {
                     "type": "boolean"
                   }
                 },
                 "required": [
-                  "targetName",
-                  "answers"
+                  "targetId"
                 ],
                 "additionalProperties": false
               }
@@ -7543,6 +8158,22 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "against",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "replicateSd",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
             }
           }
         ],
@@ -7754,20 +8385,12 @@
         "x-rate-limit-feature": "qa",
         "requestBody": {
           "required": true,
-          "x-schema-source": "zod",
+          "x-schema-source": "jsonBody",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {
-                  "pinned": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "pinned"
-                ],
-                "additionalProperties": false
+                "properties": {}
               }
             }
           }
@@ -8030,7 +8653,12 @@
                     "type": "number"
                   },
                   "preset": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "default",
+                      "factual-only",
+                      "conversational"
+                    ]
                   },
                   "noduplicateSources": {
                     "type": "boolean"
@@ -8039,10 +8667,7 @@
                 "required": [
                   "ragFileId",
                   "suiteIds",
-                  "releaseId",
-                  "qaPerChunk",
-                  "preset",
-                  "noduplicateSources"
+                  "releaseId"
                 ],
                 "additionalProperties": false
               }
@@ -8065,7 +8690,24 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -8103,7 +8745,24 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "entity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -8253,7 +8912,16 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -8617,7 +9285,21 @@
         "x-required-permissions": [
           "deny-terms:write"
         ],
-        "x-rate-limit-feature": "deny-terms"
+        "x-rate-limit-feature": "deny-terms",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "terms": {}
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/deny-terms/remove": {
@@ -8655,7 +9337,21 @@
         "x-required-permissions": [
           "deny-terms:write"
         ],
-        "x-rate-limit-feature": "deny-terms"
+        "x-rate-limit-feature": "deny-terms",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "values": {}
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/compliance/annex-iv/{releaseId}": {
@@ -8677,6 +9373,14 @@
             "name": "releaseId",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -8787,7 +9491,26 @@
         "x-required-permissions": [
           "release:write"
         ],
-        "x-rate-limit-feature": "compliance"
+        "x-rate-limit-feature": "compliance",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {
+                    "type": "string"
+                  },
+                  "releaseId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deleteComplianceAnswersByGapId",
@@ -8807,6 +9530,14 @@
             "name": "gapId",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "releaseId",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -8870,7 +9601,19 @@
         "x-required-permissions": [
           "byok:write"
         ],
-        "x-rate-limit-feature": "byok"
+        "x-rate-limit-feature": "byok",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       },
       "get": {
         "operationId": "getByok",
@@ -8885,7 +9628,48 @@
             ]
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "available",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "providerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -9092,7 +9876,19 @@
         "x-required-permissions": [
           "byok:write"
         ],
-        "x-rate-limit-feature": "byok"
+        "x-rate-limit-feature": "byok",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deleteByokByByokId",
@@ -9261,12 +10057,22 @@
         "x-rate-limit-feature": "terms",
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "castShallowObject",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "draftContent": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title"
+                ]
               }
             }
           }
@@ -9365,12 +10171,19 @@
         "x-rate-limit-feature": "terms",
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "castShallowObject",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "draftContent": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -9471,12 +10284,19 @@
         "x-rate-limit-feature": "terms",
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "castShallowObject",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "version"
+                ]
               }
             }
           }
@@ -9565,7 +10385,33 @@
         "x-required-permissions": [
           "transcript:write"
         ],
-        "x-rate-limit-feature": "terms"
+        "x-rate-limit-feature": "terms",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tosId": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "releaseId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tosId",
+                  "version"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/mcp-servers": {
@@ -9639,7 +10485,43 @@
         "x-required-permissions": [
           "release:write"
         ],
-        "x-rate-limit-feature": "mcp-servers"
+        "x-rate-limit-feature": "mcp-servers",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "authType": {
+                    "type": "string"
+                  },
+                  "authToken": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "name",
+                  "transport",
+                  "url"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/mcp-servers/{mcpServerId}": {
@@ -9731,7 +10613,38 @@
         "x-required-permissions": [
           "release:write"
         ],
-        "x-rate-limit-feature": "mcp-servers"
+        "x-rate-limit-feature": "mcp-servers",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "transport": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "authType": {
+                    "type": "string"
+                  },
+                  "authToken": {
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deleteMcpServersByMcpServerId",
@@ -9965,6 +10878,14 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "force",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -10072,7 +10993,30 @@
         "x-required-permissions": [
           "group:write"
         ],
-        "x-rate-limit-feature": "groups"
+        "x-rate-limit-feature": "groups",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "slug": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "slug"
+                ]
+              }
+            }
+          }
+        }
       },
       "get": {
         "operationId": "getGroups",
@@ -10200,7 +11144,26 @@
         "x-required-permissions": [
           "group:write"
         ],
-        "x-rate-limit-feature": "groups"
+        "x-rate-limit-feature": "groups",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name"
+                ]
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deleteGroupsByGroupId",
@@ -10292,7 +11255,26 @@
         "x-required-permissions": [
           "group:write"
         ],
-        "x-rate-limit-feature": "groups"
+        "x-rate-limit-feature": "groups",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deleteGroupsByGroupIdInvite",
@@ -10498,7 +11480,31 @@
         "x-required-permissions": [
           "permission:write"
         ],
-        "x-rate-limit-feature": "permissions"
+        "x-rate-limit-feature": "permissions",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "zod",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": [
+                  "email",
+                  "permissions"
+                ]
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deletePermissionsUsers",
@@ -10572,7 +11578,31 @@
         "x-required-permissions": [
           "permission:write"
         ],
-        "x-rate-limit-feature": "permissions"
+        "x-rate-limit-feature": "permissions",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "zod",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "groupSlug": {
+                    "type": "string"
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": [
+                  "groupSlug",
+                  "permissions"
+                ]
+              }
+            }
+          }
+        }
       },
       "delete": {
         "operationId": "deletePermissionsGroups",
@@ -10646,7 +11676,27 @@
         "x-required-permissions": [
           "permission:write"
         ],
-        "x-rate-limit-feature": "permissions"
+        "x-rate-limit-feature": "permissions",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "zod",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "permissions": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": [
+                  "permissions"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/permissions/anonymous": {
@@ -10684,7 +11734,27 @@
         "x-required-permissions": [
           "permission:write"
         ],
-        "x-rate-limit-feature": "permissions"
+        "x-rate-limit-feature": "permissions",
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "zod",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "permissions": {
+                    "type": "array",
+                    "items": {}
+                  }
+                },
+                "required": [
+                  "permissions"
+                ]
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/workspaces/{workspaceId}/rate-limit-requests": {
@@ -10721,6 +11791,18 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
         }
       },
       "get": {
@@ -10735,6 +11817,30 @@
             "name": "workspaceId",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
             "schema": {
               "type": "string"
             }
@@ -11068,6 +12174,32 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "onboardingHost": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "title",
+                  "description"
+                ]
+              }
+            }
+          }
         }
       },
       "get": {
@@ -11210,6 +12342,25 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "castShallowObject",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
         }
       },
       "delete": {
@@ -11289,6 +12440,64 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowedOrigins": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rateLimit": {
+                    "type": "object"
+                  },
+                  "ipWhitelist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expiresAt": {
+                    "type": "number"
+                  },
+                  "rotationPolicy": {
+                    "type": "object"
+                  },
+                  "releaseId": {
+                    "type": "string"
+                  },
+                  "appType": {
+                    "type": "string"
+                  },
+                  "billingModel": {
+                    "type": "string"
+                  },
+                  "paymentRail": {
+                    "type": "string"
+                  },
+                  "linkedApikeyId": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -11424,6 +12633,52 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "allowedOrigins": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "permissions": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rateLimit": {
+                    "type": "object"
+                  },
+                  "ipWhitelist": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "expiresAt": {
+                    "type": "number"
+                  },
+                  "rotationPolicy": {
+                    "type": "object"
+                  },
+                  "paymentRail": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
           }
         }
       },
@@ -11589,7 +12844,24 @@
             "BearerAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "hash",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "url",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -11665,7 +12937,16 @@
             "BearerAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "host",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -11761,12 +13042,19 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "host": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  }
+                }
               }
             }
           }
@@ -11890,18 +13178,6 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
-        },
-        "requestBody": {
-          "required": true,
-          "x-schema-source": "jsonBody",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
-          }
         }
       }
     },
@@ -11946,12 +13222,17 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "method": {},
+                  "whitelabelId": {},
+                  "releaseId": {},
+                  "hipaa": {}
+                }
               }
             }
           }
@@ -11995,18 +13276,6 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "x-schema-source": "jsonBody",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {}
-              }
-            }
           }
         }
       }
@@ -12093,12 +13362,14 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "targetWhitelabelId": {}
+                }
               }
             }
           }
@@ -12137,12 +13408,17 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "dryRun": {
+                    "type": "boolean"
+                  },
+                  "sites": {}
+                }
               }
             }
           }
@@ -12225,12 +13501,26 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "whitelabelId": {
+                    "type": "string"
+                  },
+                  "rootUrl": {
+                    "type": "string"
+                  },
+                  "ragVectorId": {
+                    "type": "string"
+                  },
+                  "products": {
+                    "type": "array",
+                    "items": {}
+                  }
+                }
               }
             }
           }
@@ -12269,12 +13559,14 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "hosts": {}
+                }
               }
             }
           }
@@ -12313,12 +13605,16 @@
         },
         "requestBody": {
           "required": true,
-          "x-schema-source": "jsonBody",
+          "x-schema-source": "type-assertion",
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": {}
+                "properties": {
+                  "whitelabelId": {},
+                  "fromVectorId": {},
+                  "toVectorId": {}
+                }
               }
             }
           }
@@ -12353,6 +13649,25 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {},
+                  "whitelabelId": {},
+                  "listInDirectory": {},
+                  "turnstileToken": {},
+                  "acceptedTerms": {},
+                  "hipaa": {}
+                }
+              }
+            }
           }
         }
       }
@@ -12427,6 +13742,21 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "host": {},
+                  "reason": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12500,6 +13830,22 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {},
+                  "turnstileToken": {},
+                  "acceptedTerms": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12531,6 +13877,22 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "claim": {},
+                  "whitelabelId": {},
+                  "hipaa": {}
+                }
+              }
+            }
           }
         }
       }
@@ -12564,6 +13926,22 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "files": {},
+                  "whitelabelId": {},
+                  "hipaa": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12595,6 +13973,24 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "uploads": {},
+                  "whitelabelId": {},
+                  "turnstileToken": {},
+                  "acceptedTerms": {},
+                  "hipaa": {}
+                }
+              }
+            }
           }
         }
       }
@@ -12637,6 +14033,20 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "host": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12677,6 +14087,21 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vectorId": {},
+                  "rows": {}
+                }
+              }
+            }
           }
         }
       }
@@ -12719,6 +14144,21 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "vectorId": {},
+                  "totalChunks": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12760,6 +14200,21 @@
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
           }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "type-assertion",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {},
+                  "vectorIds": {}
+                }
+              }
+            }
+          }
         }
       }
     },
@@ -12775,7 +14230,40 @@
             "BearerAuth": []
           }
         ],
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful response"
@@ -12810,6 +14298,167 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/workspace-rate-limits/{workspaceId}": {
+      "get": {
+        "operationId": "getAdminWorkspaceRateLimitsByWorkspaceId",
+        "tags": [
+          "admin/workspace-rate-limits"
+        ],
+        "summary": "GET /api/v1/admin/workspace-rate-limits/:workspaceId",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        }
+      }
+    },
+    "/api/v1/admin/workspace-rate-limits/{workspaceId}/{feature}": {
+      "put": {
+        "operationId": "putAdminWorkspaceRateLimitsByWorkspaceIdByFeature",
+        "tags": [
+          "admin/workspace-rate-limits"
+        ],
+        "summary": "PUT /api/v1/admin/workspace-rate-limits/:workspaceId/:feature",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAdminWorkspaceRateLimitsByWorkspaceIdByFeature",
+        "tags": [
+          "admin/workspace-rate-limits"
+        ],
+        "summary": "DELETE /api/v1/admin/workspace-rate-limits/:workspaceId/:feature",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "feature",
             "in": "path",
             "required": true,
             "schema": {
@@ -12894,6 +14543,18 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimitExceeded"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "x-schema-source": "jsonBody",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {}
+              }
+            }
           }
         }
       },
