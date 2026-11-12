@@ -11,7 +11,7 @@
   "dependencies": {
     "@divinci-ai/client": "workspace:*",
     "@divinci-ai/server": "workspace:*",
-    "dotenv": "^16.4.5"
+    "dotenv": "^18.0.9"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

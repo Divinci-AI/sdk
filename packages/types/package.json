@@ -27,7 +27,7 @@
     "prepare": "pnpm build && pnpm test"
   },
   "dependencies": {
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.4",
