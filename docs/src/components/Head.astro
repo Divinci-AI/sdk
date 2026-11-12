@@ -1,0 +1,46 @@
+---
+/**
+ * Per-page Open Graph image.
+ *
+ * Starlight's default Head just dumps `starlightRoute.head`. A single
+ * site-wide og:image in astro.config meant every Slack/X/LinkedIn unfurl
+ * showed the same 2D mark. Each docs route now has a generated card at
+ * `/og/pages/<slug>.png` (see scripts/gen-og-images.mjs). We replace any
+ * pre-existing og:image / twitter:image so unfurlers never have to pick
+ * between two tags.
+ *
+ * Absolute URL: a relative og:image is ignored by most unfurlers, which
+ * then fall back to nothing — looks like success in a browser.
+ */
+const { head, id } = Astro.locals.starlightRoute;
+const site = Astro.site ? new URL(Astro.site).origin : "https://sdk.divinci.ai";
+const slug = !id || id === "/" || id === "index" ? "index" : id.replace(/\/+$/, "");
+const image = `${site}/og/pages/${slug}.png`;
+
+const SKIP = new Set([
+  "og:image",
+  "og:image:width",
+  "og:image:height",
+  "twitter:image",
+  "twitter:card",
+]);
+
+const filtered = head.filter((item) => {
+  const key = item.attrs?.property ?? item.attrs?.name;
+  return !key || !SKIP.has(key);
+});
+
+const extras = [
+  { tag: "meta", attrs: { property: "og:image", content: image } },
+  { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+  { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+  { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+  { tag: "meta", attrs: { name: "twitter:image", content: image } },
+];
+---
+
+{
+  [...filtered, ...extras].map(({ tag: Tag, attrs, content }) => (
+    <Tag {...attrs} set:html={content} />
+  ))
+}

@@ -1,0 +1,60 @@
+{
+  "name": "@divinci-ai/types",
+  "version": "0.1.16",
+  "description": "TypeScript type definitions for the Divinci AI SDK",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "scripts"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/assert-packed-deps.mjs && node ../../scripts/assert-version-honesty.mjs",
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/check-compression-strategies.mjs",
+    "prepare": "pnpm build && pnpm test"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.3.4",
+    "typescript": "^5.9.3"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": "Divinci AI <engineering@divinci.app>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues",
+    "email": "engineering@divinci.app"
+  },
+  "homepage": "https://sdk.divinci.ai/reference/types",
+  "keywords": [
+    "divinci",
+    "ai",
+    "sdk",
+    "types",
+    "typescript"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

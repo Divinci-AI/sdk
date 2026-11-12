@@ -1,0 +1,78 @@
+---
+title: Vendor Catalog
+description: Every third-party vendor Divinci can run a job on — vector stores, embeddings, parsers, search, scraping, voice, fine-tuning and de-identification — with what each costs you in credentials and how much of our own platform runs on it.
+---
+
+import { Aside, CardGrid, LinkCard } from "@astrojs/starlight/components";
+import catalog from "../../../data/tool-catalog.json";
+import usage from "../../../data/tool-usage.json";
+
+Divinci is a **multi-vendor platform**. Almost every step of the pipeline —
+embedding a chunk, storing a vector, parsing a PDF, searching the web, speaking
+a reply, fine-tuning a model, stripping PII — is a swappable *tool*, and most
+steps have several vendors behind them.
+
+There are **{catalog.toolCount} such tools** today, excluding the ~160
+conversational models (those have their own live
+[Model Catalog](/guides/models/)).
+
+## Why you would care
+
+| If you… | Look at |
+| --- | --- |
+| already pay a vendor and want to use that account | the **BYOK** column — attach your key and the tool becomes selectable |
+| want to start with nothing | the **Divinci-managed** rows — usable with no key of your own |
+| are choosing between two options | the **Divinci usage** column: what we actually run in production |
+
+## The categories
+
+<CardGrid>
+  <LinkCard title="RAG & Vector Stores" href="/vendors/rag/" description="Where chunks live and how they are retrieved — 14 stores, from Cloudflare Vectorize to Neo4j." />
+  <LinkCard title="Embeddings" href="/vendors/embeddings/" description="The models that turn chunks into vectors, and why mixing them breaks search." />
+  <LinkCard title="Parsing & Chunking" href="/vendors/parsing/" description="Turning a PDF, a page or a record into chunks worth embedding." />
+  <LinkCard title="Search & Scraping" href="/vendors/search-scraping/" description="Web search providers and the scraping cascade." />
+  <LinkCard title="Voice & Audio" href="/vendors/voice/" description="Text-to-speech, transcription, diarization, voice cloning and voiceprints." />
+  <LinkCard title="Fine-tuning" href="/vendors/fine-tuning/" description="Where a fine-tune actually trains — Vertex, OpenAI, Cloudflare LoRA, Modal, Tinker, AWS." />
+  <LinkCard title="De-identification" href="/vendors/de-identification/" description="Presidio and Stanford NER, and the one that fails closed." />
+  <LinkCard title="Red-teaming & Evals" href="/vendors/red-teaming/" description="First-party, and deliberately so — TrustBench probes, scorers and attested runs." />
+</CardGrid>
+
+## How vendor selection works
+
+**Every tool has an auth provider.** A tool is selectable when credentials for
+its provider are available — either Divinci's (for the runtimes we pay for) or
+yours, attached as a
+[Provider Key (BYOK)](/server/byok-and-skills/).
+
+**Credentials are per workspace, and validated on save.** Each provider declares
+a JSON-schema credential shape and a live validation call, so a bad key is
+rejected at the point you paste it rather than at the point a customer asks a
+question.
+
+<Aside type="caution" title="A vector's tool is fixed at creation">
+Vector store and embedding model are properties of the vector, not of the query.
+Re-pointing an existing vector at a different embedding model does not
+re-embed anything — and vectors from two models are not comparable even at the
+same dimensionality, so similarity search degrades quietly rather than failing.
+Create a new vector and re-ingest.
+</Aside>
+
+## About the numbers on these pages
+
+The **Divinci usage** column is generated, not asserted: a weekly job asks the
+production API for aggregate counts and commits them into these pages. It
+carries **counts only** — no workspace, release, customer or corpus is
+identified, and the endpoint that produces it is a `$group`-and-`$sum` with
+nothing else in the projection.
+
+Two honest caveats about reading it:
+
+- **Zero does not mean bad.** Several vendors are supported because a specific
+  customer asked for them; the rest of the platform has no reason to use them.
+- **A count is a count of *configurations*, not of traffic.** A vector store
+  used by one enormous corpus and one used by two hundred small ones look
+  similar here.
+
+{usage.generatedAt
+  ? <p><small>Last refreshed {new Date(usage.generatedAt).toISOString().slice(0, 10)}.</small></p>
+  : <p><small>The first weekly refresh has not run yet, so usage columns read <code>—</code>.</small></p>}

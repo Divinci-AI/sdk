@@ -1,0 +1,402 @@
+---
+/**
+ * FractalBackground — site-wide sacred geometry + fractal canvas backdrop.
+ *
+ * Combines a Julia-fractal field (seeded uniquely per page load, rendered to
+ * an offscreen canvas) with evolving flower-of-life rings, Metatron's cube
+ * connecting lines, a golden spiral, and boundary rings.
+ *
+ * The whole composition sits at ~2× the previous scale, with a subtle
+ * constant rotation.
+ *
+ * Inspired by the sacred geometry visual language at https://divinci.app.
+ */
+---
+
+<canvas id="sdk-fractal-bg" aria-hidden="true"></canvas>
+
+<script>
+(function () {
+  const canvas = document.getElementById("sdk-fractal-bg");
+  if (!canvas) return;
+
+  // Move to body so it sits above Starlight's opaque page containers
+  if (document.body && canvas.parentNode !== document.body) {
+    document.body.appendChild(canvas);
+  }
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+
+  // ── Fractal cache (declared before resize uses it) ─────────────────
+  let fractalCache = null;
+
+  // ── DPR-aware dimensions ──────────────────────────────────────────
+  let W, H, dpr;
+
+  // Cap the render resolution: this is a ~3.5%-opacity backdrop, so a 1.5×
+  // backing store upscaled by CSS is visually identical to full DPR but cuts
+  // fill-rate ~1.8× on a 2× retina display. This canvas is on every page.
+  const MAX_DPR = 1.5;
+
+  function resize() {
+    dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+    W = canvas.width = window.innerWidth * dpr;
+    H = canvas.height = window.innerHeight * dpr;
+    canvas.style.width = window.innerWidth + "px";
+    canvas.style.height = window.innerHeight + "px";
+    // Invalidate the fractal cache so it re-renders at the new size
+    fractalCache = null;
+  }
+  window.addEventListener("resize", resize);
+  resize();
+
+  // ── Scale factor: everything is ~200% of the original size ────────
+  const SCALE = 3.0;
+  // ── Opacity multiplier: keep the sacred geometry barely visible ───
+  const BG_OPACITY = 0.085;
+  const PHI = (1 + Math.sqrt(5)) / 2; // 1.618…
+
+  // ── Deterministic seeded PRNG (mulberry32) ────────────────────────
+  function mulberry32(a) {
+    return function () {
+      a |= 0; a = a + 0x6d2b79f5 | 0;
+      let t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  // ── Unique fractal seed (different every visit) ───────────────────
+  const pageSeed = mulberry32((Date.now() & 0xffff) + Math.floor(Math.random() * 9999));
+  const fractalSeed = {
+    cr: -0.76 + pageSeed() * 0.4,
+    ci: 0.270 + (pageSeed() - 0.5) * 0.18,
+  };
+  const hueShiftSeed = pageSeed() * 360;    // base hue for fractal
+  const spiralSeed   = pageSeed() * 0.5;    // spiral phase offset
+
+  // ── Offscreen canvas for the Julia fractal ────────────────────────
+  // Rendered at ¼ resolution (every 4th pixel) then drawImage-scaled up
+  // so it doesn't freeze the main thread on retina displays.
+  const FRACTAL_STEP = 4;
+
+  function renderJuliaOffscreen() {
+    const sw = Math.ceil(W / FRACTAL_STEP);
+    const sh = Math.ceil(H / FRACTAL_STEP);
+
+    const oc = document.createElement("canvas");
+    oc.width = sw;
+    oc.height = sh;
+    const octx = oc.getContext("2d");
+    if (!octx) return null;
+
+    const imageData = octx.createImageData(sw, sh);
+    const data = imageData.data;
+    const cx = W / 2;
+    const cy = H / 2;
+
+    const scale = Math.min(W, H) * 0.22;
+    const hueBase = hueShiftSeed;
+    const maxIter = 60;
+
+    for (let sx = 0; sx < sw; sx++) {
+      const px = sx * FRACTAL_STEP;
+      for (let sy = 0; sy < sh; sy++) {
+        const py = sy * FRACTAL_STEP;
+        const zx0 = (px - cx) / scale;
+        const zy0 = (py - cy) / scale;
+        let zx = zx0, zy = zy0;
+        let iter = 0;
+
+        while (zx * zx + zy * zy < 4.0 && iter < maxIter) {
+          const tmp = zx * zx - zy * zy + fractalSeed.cr;
+          zy = 2.0 * zx * zy + fractalSeed.ci;
+          zx = tmp;
+          iter++;
+        }
+
+        const idx = (sy * sw + sx) * 4;
+        if (iter < maxIter) {
+          const norm = iter / maxIter;
+          const smooth = iter + 1 - Math.log(Math.log(Math.sqrt(zx * zx + zy * zy))) / Math.log(2);
+          const hue = (hueBase + smooth * 18) % 360;
+          const sat = 35 + 25 * Math.sin(smooth * 0.15);
+          const lit = 25 + 20 * Math.sin(smooth * 0.12 + 1);
+
+          const h = hue / 360;
+          const s = sat / 100;
+          const l = lit / 100;
+          const cVal = (1 - Math.abs(2 * l - 1)) * s;
+          const xVal = cVal * (1 - Math.abs((h * 6) % 2 - 1));
+          const mVal = l - cVal / 2;
+          let r1 = 0, g1 = 0, b1 = 0;
+          if (h < 1/6)      { r1 = cVal; g1 = xVal; b1 = 0; }
+          else if (h < 2/6) { r1 = xVal; g1 = cVal; b1 = 0; }
+          else if (h < 3/6) { r1 = 0; g1 = cVal; b1 = xVal; }
+          else if (h < 4/6) { r1 = 0; g1 = xVal; b1 = cVal; }
+          else if (h < 5/6) { r1 = xVal; g1 = 0; b1 = cVal; }
+          else              { r1 = cVal; g1 = 0; b1 = xVal; }
+
+          const alpha = 0.35 * (1 - Math.pow(norm, 0.5));
+          data[idx]     = Math.round((r1 + mVal) * 255);
+          data[idx + 1] = Math.round((g1 + mVal) * 255);
+          data[idx + 2] = Math.round((b1 + mVal) * 255);
+          data[idx + 3] = Math.round(Math.max(0, Math.min(255, alpha * 255)));
+        }
+      }
+    }
+    octx.putImageData(imageData, 0, 0);
+    return oc;
+  }
+
+  // ── Sacred geometry parameters (2× scale) ─────────────────────────
+  const maxRadius = Math.min(W, H) * 0.35 * SCALE;
+  const ringCount = 5;
+
+  const ringConfigs = [];
+  for (let r = 0; r < ringCount; r++) {
+    const seed = mulberry32(r * 313 + 7);
+    ringConfigs.push({
+      count: 6 + r * 6,
+      baseRadius: maxRadius * (0.15 + r * 0.18),
+      hueOff: seed() * 360,
+      satOff: (seed() - 0.5) * 25,
+      lineWidth: (0.5 + r * 0.3) * dpr,
+      speedPhase: seed() * Math.PI * 2,
+      circleSize: maxRadius * (0.05 + r * 0.015) * SCALE,
+    });
+  }
+
+  // ── Draw one flower-of-life ring ───────────────────────────────────
+  function drawRing(cx, cy, config, t, effectiveRotSpeed) {
+    const { count, baseRadius, hueOff, satOff, lineWidth, speedPhase, circleSize } = config;
+    const breath = 1 + 0.04 * Math.sin(t * 0.15 + speedPhase);
+    const radius = baseRadius * breath;
+    const rot = t * effectiveRotSpeed + speedPhase * 0.1;
+
+    // ── Metatron's cube connecting lines ──────────────────────────
+    if (count >= 12) {
+      ctx.beginPath();
+      const pts = [];
+      for (let i = 0; i < count; i++) {
+        const a = rot + (i / count) * Math.PI * 2;
+        pts.push({ x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a) });
+      }
+      const step = count >= 24 ? 3 : count >= 18 ? 2 : 1;
+      for (let i = 0; i < pts.length; i += step) {
+        for (let j = i + step * 2; j < pts.length; j += step * 2) {
+          const dx = pts[j].x - pts[i].x;
+          const dy = pts[j].y - pts[i].y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < radius * 2.4) {
+            ctx.moveTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[j].x, pts[j].y);
+          }
+        }
+      }
+      const hue = (260 + (t * 0.3) % 360 + hueOff * 0.5) % 360;
+      ctx.strokeStyle = `hsla(${hue}, 40%, 60%, ${0.04 * BG_OPACITY})`;
+      ctx.lineWidth = (0.4 * dpr);
+      ctx.stroke();
+    }
+
+    // ── Circles of this ring ──────────────────────────────────────
+    for (let i = 0; i < count; i++) {
+      const a = rot + (i / count) * Math.PI * 2;
+      const x = cx + radius * Math.cos(a);
+      const y = cy + radius * Math.sin(a);
+      const r = circleSize * breath * (1 + 0.15 * Math.sin(t * 0.1 + i));
+
+      const circleHue = (260 + (t * 0.2) % 360 + hueOff + (i / count) * 120) % 360;
+      const sat = 45 + satOff + 10 * Math.sin(t * 0.05 + i);
+      const lit = 50 + 10 * Math.sin(t * 0.03 + i * 1.3);
+
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${circleHue}, ${sat}%, ${lit}%, ${0.18 * BG_OPACITY})`;
+      ctx.fill();
+      ctx.strokeStyle = `hsla(${circleHue}, ${sat}%, ${lit + 10}%, ${0.25 * BG_OPACITY})`;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+  }
+
+  // ── Golden ratio spiral ───────────────────────────────────────────
+  function drawSpiral(cx, cy, t) {
+    ctx.beginPath();
+    const turns = 3.5;
+    const maxR = maxRadius * 0.9;
+    const steps = 400;
+    for (let i = 0; i <= steps; i++) {
+      const frac = i / steps;
+      const a = t * 0.05 + spiralSeed + frac * turns * Math.PI * 2;
+      const r = maxR * Math.pow(frac, 0.6) * 0.85;
+      const x = cx + r * Math.cos(a);
+      const y = cy + r * Math.sin(a);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    const hue = (200 + (t * 0.4) % 360) % 360;
+      ctx.strokeStyle = `hsla(${hue}, 50%, 60%, ${0.12 * BG_OPACITY})`;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.stroke();
+  }
+
+  // ── Outer boundary rings (3 rings, slow-pulsing) ──────────────────
+  function drawBoundary(cx, cy, t) {
+    for (let i = 0; i < 3; i++) {
+      const r = maxRadius * (0.85 + i * 0.08) * (1 + 0.02 * Math.sin(t * 0.08 + i * 1.5));
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      const hue = (280 + i * 40 + (t * 0.12) % 360) % 360;
+      ctx.strokeStyle = `hsla(${hue}, 35%, 50%, ${(0.12 - i * 0.025) * BG_OPACITY})`;
+      ctx.lineWidth = (0.8 - i * 0.2) * dpr;
+      ctx.stroke();
+    }
+  }
+
+  // ── Main animation loop ───────────────────────────────────────────
+  // The fractal/rings/spiral evolve very slowly (rotation ~0.02 rad/s, hue
+  // drift ~0.1/s), so a 30fps redraw is indistinguishable from 60fps but halves
+  // the per-frame fill cost. rAF still ticks at display rate; we just skip the
+  // heavy draw between throttle windows.
+  let startTime = null;
+  const TARGET_FPS = 30;
+  const FRAME_MS = 1000 / TARGET_FPS;
+  let lastDraw = -Infinity;
+  let drawnOnce = false;
+
+  function frame(ts) {
+    if (drawnOnce && ts - lastDraw < FRAME_MS) {
+      if (!prefersReducedMotion() && fractalActive) requestAnimationFrame(frame);
+      else running = false;
+      return;
+    }
+    lastDraw = ts;
+    drawnOnce = true;
+    try {
+      if (startTime === null) startTime = ts;
+      const t = (ts - startTime) / 1000;
+
+      const cx = W / 2;
+      const cy = H / 2;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // ── Layer 1: Julia fractal background ─────────────────────────
+      try {
+        if (!fractalCache) {
+          fractalCache = renderJuliaOffscreen();
+        }
+        if (fractalCache) {
+          ctx.globalAlpha = 0.16;
+          ctx.imageSmoothingEnabled = true;
+          ctx.drawImage(fractalCache, 0, 0, W, H);
+          ctx.globalAlpha = 1;
+        }
+      } catch (e) {
+        console.warn("[FractalBackground] Julia render skipped:", e);
+        fractalCache = null;
+        ctx.globalAlpha = 1;
+      }
+
+      const effectiveRotSpeed = 0.02;
+
+      // ── Layer 2: Centre point (seed of life) ───────────────────────
+      const centerHue = (260 + t * 0.1) % 360;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4 * dpr, 0, Math.PI * 2);
+      ctx.fillStyle = `hsla(${centerHue}, 60%, 70%, 0.12)`;
+      ctx.fill();
+
+      // ── Layer 3: Rings ────────────────────────────────────────────
+      for (const config of ringConfigs) {
+        drawRing(cx, cy, config, t, effectiveRotSpeed);
+      }
+
+      // ── Layer 4: Golden spiral ────────────────────────────────────
+      drawSpiral(cx, cy, t);
+
+      // ── Layer 5: Outer boundary ───────────────────────────────────
+      drawBoundary(cx, cy, t);
+    } catch (e) {
+      console.warn("[FractalBackground] Frame error (loop continues):", e);
+    }
+
+    // Stop the loop under reduced-motion (one static frame) or when paused
+    // (tab hidden / 30s idle). kick() restarts it.
+    if (!prefersReducedMotion() && fractalActive) requestAnimationFrame(frame);
+    else running = false;
+  }
+
+  function prefersReducedMotion() {
+    return Boolean(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  }
+
+  // ── Pause when not worth animating ────────────────────────────────
+  // This canvas is on EVERY page, so pause it when the tab is hidden or the
+  // user has been idle 30s (a static fractal is visually identical — it
+  // evolves imperceptibly). Any interaction or tab-focus resumes it.
+  let running = false;
+  let fractalActive = true;
+  let idle = false;
+  let pageVisible = !document.hidden;
+  const FRACTAL_IDLE_MS = 30000;
+  let fIdleTimer;
+
+  function kick() {
+    if (running || prefersReducedMotion() || !fractalActive) return;
+    running = true;
+    requestAnimationFrame(frame);
+  }
+  function recomputeFractal() {
+    const active = pageVisible && !idle;
+    if (active === fractalActive) return;
+    fractalActive = active;
+    if (active) kick();
+  }
+  function armFractalIdle() {
+    clearTimeout(fIdleTimer);
+    if (idle) { idle = false; recomputeFractal(); }
+    fIdleTimer = setTimeout(() => { idle = true; recomputeFractal(); }, FRACTAL_IDLE_MS);
+  }
+  document.addEventListener("visibilitychange", () => {
+    pageVisible = !document.hidden;
+    recomputeFractal();
+  });
+  ["mousemove", "pointerdown", "keydown", "wheel", "touchstart", "scroll"].forEach((ev) =>
+    window.addEventListener(ev, armFractalIdle, { passive: true })
+  );
+
+  // ── Debounced resize ──────────────────────────────────────────────
+  // Repaint one fresh frame at the new size; if the loop is live it'll pick the
+  // new size up on its own next tick (cache was invalidated in resize()).
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resize();
+      if (!running) requestAnimationFrame(frame);
+    }, 150);
+  });
+
+  armFractalIdle();
+  // Reduced motion → one static frame; otherwise start the (throttled) loop.
+  if (prefersReducedMotion()) requestAnimationFrame(frame);
+  else kick();
+})();
+</script>
+
+<style>
+  #sdk-fractal-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 1;
+  }
+</style>

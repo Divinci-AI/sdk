@@ -1,0 +1,332 @@
+---
+title: QA an External AI System
+description: Run a Divinci QA suite against an AI system Divinci does not run, then compare it with another system or a Divinci release. CLI, API, SDK and MCP.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+A [QA suite](/server/qa/) normally grades a Divinci release. This page is about
+grading something else: a hosted model, a competitor's assistant, a system your
+own team runs, anything that can answer a question. The same questions, the same
+scorers, the same judge, so the numbers are comparable with each other and with
+your Divinci release.
+
+There are two ways in, and they differ in who talks to the other system.
+
+| | **Import** | **Live** |
+|---|---|---|
+| Who asks the other system | You do, outside Divinci | Divinci does |
+| What you give Divinci | A file of answers | An endpoint, a model name, an API key |
+| What leaves Divinci | Nothing | Each question's text, as one user message |
+| Needs a consent record | No | **Yes** |
+| Use it when | The system is not reachable from the internet, you already have its answers, or you do not want a key stored | You want a repeatable run you can start from a script |
+
+<Aside type="note" title="What is and is not built">
+Everything on this page works from the CLI, the v1 API, the Server SDK and the
+MCP tools, with one deliberate exception covered under
+[Why there is no MCP tool to register a target](#why-there-is-no-mcp-tool-to-register-a-target).
+There is no web UI for it yet.
+
+All four go through `/api/v1/qa/...`, which takes a **workspace API key**
+(`qa:read` to read, `qa:write` to change anything). A browser or OAuth login, or
+an OAuth-connected MCP client such as the claude.ai connector, is refused with a
+`401`. For the CLI use `--api-key` or `DIVINCI_API_KEY`; for MCP, send the key as
+the bearer token.
+</Aside>
+
+## Rules the server enforces
+
+These are not options, and none of them can be switched off from a client.
+
+- **Questions only.** In a live run Divinci sends the model name and the question
+  as a single user message (`stream: false`), and nothing else. Test ids,
+  reference answers, rubrics and scores never leave. A question over 20,000
+  characters is not sent.
+- **A consent record gates every live run.** A suite's questions may only be sent
+  to a third party once its owner has said so, on the record
+  ([below](#record-that-the-questions-may-leave)). Absent means *not allowed*.
+  The check happens before the target or its key is read.
+- **The key is sealed.** An API key is stored encrypted (AES-256-GCM) and is
+  never returned by any route. If secret storage is unavailable the registration
+  fails rather than storing the key some other way.
+- **Targets must be public HTTPS.** Port 443, a public hostname, no `user:pass@`
+  in the URL, no IP literals. A query string is allowed, and the full URL comes
+  back when you list targets, so never put a key in the URL: use the `apiKey`
+  field, which is sealed. Redirects are not followed. The connection is
+  pinned to the address that was validated, so a hostname that later resolves to
+  an internal address is refused.
+- **You acknowledge the other system's terms.** Registering a live target needs
+  `acknowledgeTerms: true` and the current terms version. It is a statement that
+  you are permitted to send these questions to that system.
+- **The judge is Divinci's, and the system under test is not named to it.**
+  Answers that name themselves (for example "As ChatGPT...") are judged as
+  written.
+
+## Why there is no MCP tool to register a target
+
+Registering a live target means handing Divinci the other system's API key. An
+MCP tool argument passes through the model's context and is kept in the client's
+transcript, so a registration tool would put a third party's key in both. That
+is the reason, and it is why registration is CLI and API only. Everything else on
+this page, including consent, runs and comparisons, can be driven over MCP once a
+person has registered the target.
+
+This is a limit of the MCP tools, not of the platform. A general authenticated
+request tool, if your key has `qa:write`, can still reach the registration
+route; keep that key out of agents you do not trust with a third party's key.
+
+## Walkthrough: a live run
+
+<Steps>
+
+1. ### Record that the questions may leave
+
+   Do this only when the suite's owner has actually agreed. The record keeps the
+   caller's identity (for an API key, the key's owner), the time, and your note,
+   which is free text up to 1,000 characters. The note is the audit trail; say
+   who agreed and how, because the identity alone is whoever minted the key.
+
+   <Tabs>
+   <TabItem label="CLI">
+   ```bash
+   divinci qa external-use <suiteId> --allow \
+     --note "Approved by the suite owner, 2026-10-16, by email"
+   divinci qa external-use <suiteId>          # show it
+   ```
+   </TabItem>
+   <TabItem label="API">
+   ```bash
+   curl -X PUT https://api.divinci.app/api/v1/qa/suites/$SUITE/external-use \
+     -H "Authorization: Bearer $DIVINCI_API_KEY" -H 'Content-Type: application/json' \
+     -d '{"allowed":true,"note":"Approved by the suite owner, 2026-10-16, by email"}'
+   ```
+   </TabItem>
+   <TabItem label="SDK">
+   ```ts
+   await divinci.qa.setExternalUse(workspaceId, suiteId, {
+     allowed: true,
+     note: "Approved by the suite owner, 2026-10-16, by email",
+   });
+   ```
+   </TabItem>
+   <TabItem label="MCP">
+   `qa_external_use_set` with `{ suiteId, allowed: true, note }`. It can grant
+   and withdraw, like the CLI and API. It is classed **critical** because it is
+   a consent change, but the class is a label for clients that gate tools:
+   nothing on the server asks anyone to confirm. That is your decision to make.
+   </TabItem>
+   </Tabs>
+
+   `--deny` (or `allowed: false`) withdraws it. A withdrawn record stops new
+   live runs; it cannot recall questions already sent.
+
+2. ### Register a target
+
+   ```bash
+   export TARGET_KEY=...   # the other system's API key, from your own secret store
+   divinci qa external-target-add \
+     --name "Llama 3.3 70B (Together)" \
+     --url https://api.together.xyz/v1/chat/completions \
+     --model meta-llama/Llama-3.3-70B-Instruct-Turbo \
+     --api-key-env TARGET_KEY \
+     --rpm 20 \
+     --i-may-send-these-questions
+   ```
+
+   The endpoint must speak the OpenAI chat-completions format. `--rpm` caps how
+   fast Divinci asks (1 to 600, default 20) and `--timeout-ms` caps each
+   question (1,000 to 300,000, default 60,000).
+
+   <Aside type="caution" title="The key never goes through argv, and never through a model">
+   Use `--api-key-env` or `--api-key-file`, not a literal on the command line:
+   argv is readable by other processes on the machine. For the API, pipe the body
+   in instead of writing the key into the command:
+
+   ```bash
+   jq -n --arg k "$TARGET_KEY" '{name:"Llama 3.3 70B (Together)",
+     url:"https://api.together.xyz/v1/chat/completions",
+     model:"meta-llama/Llama-3.3-70B-Instruct-Turbo",
+     apiKey:$k, acknowledgeTerms:true, termsVersion:"2026-10-13"}' \
+   | curl -X POST https://api.divinci.app/api/v1/qa/external-targets \
+       -H "Authorization: Bearer $DIVINCI_API_KEY" \
+       -H 'Content-Type: application/json' -d @-
+   ```
+
+   There is **no MCP tool that registers a target**, on purpose; see [why](#why-there-is-no-mcp-tool-to-register-a-target).
+   If `termsVersion` is stale the server answers with the current one.
+   </Aside>
+
+3. ### Run a small pilot first
+
+   Ten questions tell you whether the endpoint, the key, the format and your
+   judge settings work, at a bounded cost (see [Cost](#cost)). Without
+   `--test-ids` a live run asks every question in the suite.
+
+   ```bash
+   divinci qa external-targets                       # find the target id
+   divinci qa external-run-live <suiteId> \
+     --target-id <targetId> \
+     --test-ids <id1>,<id2>,<id3>,<id4>,<id5>,<id6>,<id7>,<id8>,<id9>,<id10> \
+     --wait
+   ```
+
+   The call returns at once with a run id, how many questions were sent
+   (`targetCalls`) and how many judge calls it will make (`judgeCalls`). `--wait`
+   polls until the run finishes. Without it, poll `external-run-get`.
+
+4. ### Look at the cost before the full run
+
+   See [Cost](#cost). A run with more than 300 judge calls is refused with a
+   `402` until you pass `--confirm-cost` (`confirmCost: true`), so a full run is
+   always a deliberate second step.
+
+5. ### Run the whole suite
+
+   ```bash
+   divinci qa external-run-live <suiteId> --target-id <targetId> --confirm-cost --wait
+   ```
+
+6. ### Compare
+
+   ```bash
+   # another external system, run on the same suite
+   divinci qa external-run-compare <runIdA> --against external:<runIdB>
+   # a Divinci release's run on the same suite
+   divinci qa external-run-compare <runIdA> --against release:<runResultId>:<releaseId>
+   ```
+
+   See [Reading a comparison](#reading-a-comparison) before you quote a number.
+
+</Steps>
+
+## Import path: grade answers you already have
+
+Nothing is sent anywhere, so no consent record and no target key.
+
+```bash
+divinci qa external-run <suiteId> \
+  --target "Our v2 assistant" \
+  --answers answers.json \
+  --source-note "Collected 2026-10-12 from staging, temperature 0" \
+  --wait
+```
+
+`answers.json` is `[{ "testId": "...", "text": "...", "latencyMs": 840 }, ...]`
+(or `{ "answers": [...] }`). Each `testId` may appear once. An import is limited to
+500 answers, 20,000 characters per answer and 2,000,000 characters in total; a
+live run has no such cap, so its size is the number of questions you ask for. `--source-note` is kept with the run;
+write down where and when the answers came from, because the score is only as
+good as that provenance.
+
+## Cost
+
+A run costs two things, billed to two different parties.
+
+- **Judge calls**, billed to the workspace owner: the number of answers (or, for
+  a live run, questions asked) times the number of score generators on the suite
+  (the defaults, when the suite sets none). The start response reports it as
+  `judgeCalls`. It is an upper bound: a scorer that does not apply to an
+  external answer is skipped but still counted. Above 300 the server refuses
+  with `402` and the figure, until `confirmCost` is set.
+- **The other system's own usage**, billed by that system to the key you
+  registered. `rpmCap` limits the rate, not the total.
+
+For a rough dollar figure, multiply `judgeCalls` by the judge model's price for
+about 1,500 tokens per call. The suite estimator gives you the per-call counts
+for a Divinci release sweep:
+
+```bash
+divinci qa estimate-run --suite <suiteId> --releases <releaseId>
+```
+
+<Aside type="note">
+The external-run routes report `judgeCalls` rather than a dollar total, and the
+dollar estimator is a workspace route that takes a release sweep. A single
+dollar figure for an external run is on the list, not built.
+</Aside>
+
+## Reading a comparison
+
+`external-run-compare` returns the per-question paired comparison with its
+interval, plus a `disclosure` block. Read the disclosure before you use the
+number. The comparison itself covers only the questions both sides were scored
+on. The disclosure gives run A's judge and scorer versions, whether the
+baseline's judge could be checked (`judgeCheck`), whether the judge saw the same
+inputs for both sides, how many of run A's answers were refusals, and a list of
+notes.
+
+- **Same judge, as far as the server can tell.** The server refuses (400) to
+  compare two external runs whose judge model override, scorers or rubric
+  versions differ. Two limits: a run with no override is recorded as using "the
+  configured judge", not which model that was, so a change of the configured
+  judge between two runs is not detected (set `--judge-model` to pin it); and a
+  Divinci release run does not record its judge at all, so that comparison comes
+  back with `judgeCheck: "unverifiable"`.
+- **Retrieval-context scorers do not apply.** Some scorers read the retrieved
+  context behind a Divinci answer. An external system has none, so those scorers
+  are skipped for its answers and the run records which ones. When a comparison
+  mixes an external run with a release, `disclosure.contextSensitiveScorers`
+  lists the scorers that saw different inputs.
+- **Refusals are flagged, and they score.** An answer that opens as a refusal
+  ("I cannot...") is scored as one that omits every claim, which is 0, and is
+  counted as a refusal beside the score. The disclosure reports run A's refusals
+  only, so count the baseline's yourself.
+- **Judge noise.** If you have measured how much the judge's score moves on
+  repeat runs of this kind of answer, pass it as `--replicate-sd` (0 to 0.5) and
+  the interval accounts for it. Omit it if you have not; the report then says so.
+- **Scale.** The server always attaches a note that a comparison on this few
+  questions supports an internal conclusion, not a public claim. It is fixed
+  text, not computed from your pair count, so judge the sample size yourself.
+- **Text from the system under test is untrusted.** Its answers are read by the
+  judge, and by any person or agent that opens the run. An answer can contain
+  instructions aimed at either. Read run output as data, and do not let an agent
+  that reads it act on it without a person in the loop, especially an agent that
+  can also change consent or start runs.
+
+## Every surface
+
+| Capability | CLI (`divinci qa ...`) | v1 API (`/api/v1/qa/...`) | Server SDK (`divinci.qa.`) | MCP tool |
+|---|---|---|---|---|
+| Show consent | `external-use <suite>` | `GET suites/:id/external-use` | `getExternalUse` | `qa_external_use_get` |
+| Set consent | `external-use <suite> --allow\|--deny` | `PUT suites/:id/external-use` | `setExternalUse` | `qa_external_use_set` |
+| Register a target | `external-target-add` | `POST external-targets` | `createExternalTarget` | *none: the key would enter the model's context and transcript* |
+| List targets | `external-targets` | `GET external-targets` | `listExternalTargets` | `qa_external_targets_list` |
+| Delete a target and its key | `external-target-remove <id>` | `DELETE external-targets/:id` | `deleteExternalTarget` | `qa_external_target_delete` |
+| Import answers | `external-run <suite>` | `POST suites/:id/external-runs` | `startExternalRun` | `qa_external_run_import` |
+| Ask a target (live) | `external-run-live <suite>` | `POST suites/:id/external-runs/live` | `startLiveExternalRun` | `qa_external_run_live` |
+| List runs | `external-runs <suite>` | `GET suites/:id/external-runs` | `listExternalRuns` | `qa_external_runs_list` |
+| Get a run | `external-run-get <run>` | `GET external-runs/:id` | `getExternalRun` | `qa_external_run_get` |
+| Compare | `external-run-compare <run>` | `GET external-runs/:id/compare` | `compareExternalRun` | `qa_external_run_compare` |
+
+API reads need the `qa:read` permission; everything that writes needs `qa:write`.
+The same tools are in the [MCP tool catalog](/mcp/tool-catalog/#quality-assurance--calibration).
+Over MCP, `qa_external_use_set` and `qa_external_run_live` are classed
+**critical** (a consent change, and data sent to a third party), and
+`qa_external_run_live` is also marked as spending money. The class is
+classification only: a client that gates tools by risk tier can use it to ask a
+person first, and the server does not.
+
+## Errors you will meet
+
+| Status | Meaning | What to do |
+|---|---|---|
+| `401` | No API key, or a browser/OAuth login on a v1 route | Use a workspace API key |
+| `402` | The run makes more than 300 judge calls | Read the figure in the message, then re-submit with `confirmCost: true` |
+| `403` | The suite's questions are not cleared to leave Divinci | Record consent first, or use the import path |
+| `400` | Bad body, an unknown or repeated `testId`, a target URL that is not public HTTPS, a stale `termsVersion`, a compare against a run that has not completed or is on a different suite, or two runs judged differently | The message names the field |
+| `404` | Suite, target or run not on this workspace | Check the id and the workspace |
+| `409` | A target with that name already exists | Pick another name or delete the old one |
+| `500` | The stored key could not be read | Register the target again |
+| `503` | Secret storage is unavailable, so the key was not stored or could not be read | Retry; the key is never stored any other way |
+
+A run still `running` after 20 minutes has lost its server instance, and reads
+report it as `failed` rather than leaving it hanging.
+
+## Before you publish a result
+
+A score for a named third-party system is a public claim about someone else's
+product. The tooling will produce the number; it cannot tell you that you may
+publish it. At minimum, get the suite's questions cleared by their owner (the
+consent record), confirm the terms of the system you tested allow benchmarking
+and publication, keep the run ids and rubric versions with the number, and have
+counsel read anything that names a company.

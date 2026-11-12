@@ -1,0 +1,287 @@
+---
+title: "TrustBench Leaderboards"
+description: "How the public TrustBench leaderboards are built: what a row is, how its score is chosen, what its dates mean, who judges it, the retrieval results they show, and how to publish your own row."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The public leaderboards at [divinci.ai/trustbench](https://divinci.ai/trustbench/)
+rank configurations on Divinci's benchmarks. Every number on them comes from a
+**signed TrustRun** (see [TrustBench](/server/trustbench/)), so any row can be
+checked against its manifest without trusting Divinci. This page explains how
+the boards are put together and what their results say.
+
+## What a row is
+
+A row is **one configuration**: a model, and the retrieval stack it answered
+through (or no retrieval at all). Two runs of the same model through different
+stacks are different rows. The same model through PageIndex and through Qdrant
+is two configurations, not one.
+
+The retrieval stack comes from the vectors the answers were served by. A
+PageIndex group that uses the Jev node selector is its own stack
+(`divinci-pageindex+jev`), separate from PageIndex with the default selector.
+
+## How the score is chosen
+
+- A row's score is the **median** of its most recent qualifying public runs
+  (up to five). With an even number of runs the **lower** median is used.
+- The shown score is always a **real run's score**, never an average. The row's
+  "signed manifest" link opens exactly that run, so the number can be verified.
+- The row also shows how many runs the median was taken over, and the lowest
+  and highest score among them. A wide range means the configuration's results
+  vary from run to run; that is itself a finding.
+- Runs are excluded, and counted but not shown, when they are private, not yet
+  complete, scored against a different version of the benchmark, or were
+  answered while a retrieval backend was failing, or declare
+  their score a stub.
+
+## How much a rank means
+
+Each row shows a **95% interval** for the shown run's score, computed from the
+run's signed outputs, so anyone can recompute it:
+
+| Items | Method |
+| --- | --- |
+| Pass/fail probes (red team) | Wilson interval on the severity-weighted attack success rate, with Kish's effective sample size |
+| Pass/fail samples (grounding) | Wilson interval on the pass rate |
+| Partly credited answers (retrieval QA) | Percentile bootstrap of the mean, 2,000 resamples, seeded from the run id |
+
+An interval is only attached when recomputing the score from the item results
+reproduces the signed score exactly; otherwise the row shows none. A row marked
+**≈** has an interval that overlaps the row directly above it (same judge): the
+two are not statistically separable, whatever their ranks say. Boards of 11 to 60
+items have wide intervals, and many neighbouring rows are tied in this sense.
+
+## Where a number came from
+
+Every row is labelled with the source its signed manifest declares
+(`results.provenance.sourceKind`):
+
+- **Measured**: the TrustBench harness called the model and scored it.
+- **Republished**: Divinci's scored-QA pipeline scored it, and the result was
+  republished into a signed run.
+- **Source not declared**: the manifest predates provenance.
+- **Mixed sources**: the runs behind the row disagree.
+
+Divinci also discloses two facts about a configuration, on the row:
+
+- **Built by Divinci**: the configuration is Divinci's own. Divinci runs these
+  boards and ranks its own stacks next to competitors'.
+- **Tuned on these questions**: it was developed on the board's own items, so
+  its score is not a held-out result.
+
+Disclosures belong to the configuration on that board, not to individual runs,
+so every run of it carries them, including runs published later.
+
+## What the dates mean
+
+Hover (or tap) any row on the public page to see the runs behind its score.
+Each run lists:
+
+| Field | Meaning |
+| --- | --- |
+| **Answered** | When the model produced the answers being scored, from the earliest to the latest answer. |
+| **Published** | When the run was first made public. |
+| **Signed** | When the run's manifest was signed. Shown instead of *Published* for runs made public before publication dates were recorded (before 2026-09-25). |
+| **Judge** | The model that scored the answers, when recorded. |
+
+The card also gives the date the row first appeared on the board. All times are
+UTC.
+
+<Aside type="caution">
+  **Signed is not answered.** A run's manifest is signed when it is published,
+  which can be days after the answers were generated. For republished runs
+  (below), the signing date says nothing about when the model answered; use
+  *Answered* for that.
+</Aside>
+
+The same per-run detail is in the public API:
+`GET https://api.divinci.app/v1/trustbench/public/leaderboard` returns, for each
+row, `runs[]` (`runId`, `score`, `signedAt`, `publishedAt`, `answeredFrom`,
+`answeredTo`, `judgeModelId`, `scoreCI`, `scoreSource`, `isMedian`) and
+`firstPublishedAt`, plus the row's `scoreCI`, `scoreSource`, `disclosures`,
+`statisticallyTiedWithAbove` and, for red-team rows, `atlas`.
+
+## MITRE ATLAS
+
+Red-team results are also reported per **MITRE ATLAS™** technique. Each probe
+technique maps to the closest ATLAS technique in release **2026.09** (for
+example, system-prompt extraction probes map to `AML.T0056` Extract LLM System
+Prompt, and poisoned retrieved chunks to `AML.T0051.001` and `AML.T0070` RAG
+Poisoning). Some probes, such as off-domain drift, map to none and are counted
+as unmapped rather than forced onto a technique. The mapping is Divinci's;
+MITRE has not reviewed or endorsed it.
+
+Download any public red-team run as an ATLAS Navigator layer and open it in the
+ATLAS Navigator:
+
+```http
+GET https://api.divinci.app/v1/trustbench/public/runs/:runId/atlas-layer
+```
+
+The layer is computed from the run's signed outputs on each request.
+
+MITRE ATLAS™ technique ids and names © 2026 The MITRE Corporation. This work is
+reproduced and distributed with the permission of The MITRE Corporation.
+
+## Who judges the answers
+
+The retrieval boards are scored by an **LLM judge** with the
+`llm-factual-consistency-vs-reference` rubric: the judge breaks the reference
+answer into claims and classifies each one as supported, contradicted or
+missing in the model's answer, and the score is computed from that
+classification by code, not by the judge.
+
+- The judge is named in each run's signed metric, for example
+  `llm-factual-consistency-vs-reference-judged-by-gemini-3.8-flash`, and in the
+  row's hover card.
+- **Rows on one board can have different judges.** On the nutrition board, the
+  PageIndex + Jev row is judged by `gemini-3.8-flash` and the other rows by
+  `gemini-2.5-flash`. Check the hover card before comparing rows closely.
+- How much the judge matters was measured by re-scoring the published rows'
+  stored answers with other judges. The ranking on both retrieval boards was
+  the same under `gemini-2.5-flash`, `gemini-3.8-flash` and
+  `deepseek-v4-flash`. `gemini-3.8-flash` scored the nutrition rows between
+  0.9 and 5.2 points higher than `gemini-2.5-flash`. Re-scoring the same answers
+  twice with the *same* judge moved a low-scoring row by 2.5 points, so treat
+  differences of a few points as within the judge's own noise.
+
+## The retrieval boards
+
+Both retrieval boards ask **60 questions** with reference answers about one
+corpus, answered by the same model (`@cf/zai-org/glm-5.3-flash`) through
+different retrieval stacks. The runs are **republished**: the answers and
+scores come from Divinci's scored-QA pipeline and are republished into signed
+TrustRuns, and the manifests say so (`results.provenance.sourceKind:
+republished`).
+
+### Dr. Fuhrman Nutrition Corpus — Retrieval QA (60)
+
+A nutrition corpus of books, podcast transcripts, recipes and product pages.
+As of 2026-09-25:
+
+| Rank | Retrieval stack | Score | Runs |
+| --- | --- | --- | --- |
+| 1 | External retrieval tool (two tools) | 0.947 | 3 |
+| 2 | Vertex AI Vector Search v2 | 0.920 | 3 |
+| 3 | Qdrant (cosine) | 0.884 | 3 |
+| 4 | Vectorize (cosine) | 0.836 | 3 |
+| 5 | Divinci PageIndex (tree reasoning, Jev node selection) | 0.812 | 3 |
+| 6 | Divinci PageIndex (tree reasoning) | 0.384 | 3 |
+
+The live board is authoritative; this table is a dated snapshot.
+
+### Divinci SDK Docs — Retrieval QA (60)
+
+These docs, as a corpus. As of 2026-09-25:
+
+| Rank | Retrieval stack | Score | Runs |
+| --- | --- | --- | --- |
+| 1 | Vertex AI Vector Search v2 | 0.755 | 3 |
+| 2 | Qdrant (cosine) | 0.732 | 3 |
+| 3 | No retrieval | 0.078 | 3 |
+
+The no-retrieval row is the floor: the same model answering from its weights
+alone.
+
+## PageIndex and Jev node selection
+
+**PageIndex** retrieves without vectors. Each document is indexed as a tree of
+sections (titles, summaries and text), and at query time a selector chooses
+which sections to give the answering model.
+
+- **The default selector** shows one LLM every tree's section titles and
+  summaries and asks it to pick section ids. A summary rarely states the
+  specific fact a question asks about, and the corpus text does not fit in one
+  prompt, so this selector cannot read the passages it chooses between. On the
+  nutrition board it scores 0.384.
+- **Jev node selection** (`typesafe/jev-two-stage`) replaces that choice with
+  TypeSafe's Jev model, in two stages. First it scores every section's title
+  and summary for whether it is likely to contain the answer, and keeps the best
+  documents. Then it reads the **text** of those documents' sections in
+  overlapping windows and scores whether each one states the answer. Sections
+  are ranked by their best window. It scores **0.812** (median of three runs,
+  0.771–0.817).
+
+The two PageIndex rows are close to, but not exactly, a like-for-like
+comparison. The Jev row answers over trees that were repaired afterwards to
+include each section's text, and without the corpus's forum Q&A source; the
+published default-selector row predates that repair and includes it. Run on the
+Jev row's exact setup, the default selector scored a median of 0.369 over five
+passes (judged by `gemini-2.5-flash`), so the gap is not an artifact of the
+different setups.
+
+### Turning Jev on
+
+Jev is available to every workspace. Choose it per PageIndex vector, or for
+every PageIndex vector in a retrieval group:
+
+```bash
+# one PageIndex vector
+divinci rag set-tree-search-model <ragVectorId> --model typesafe/jev-two-stage
+divinci rag set-tree-search-model <ragVectorId> --clear      # back to the default selector
+```
+
+```http
+PATCH /api/v1/rag/targets/:collectionId
+{ "treeSearchModel": "typesafe/jev-two-stage" }
+
+PUT /white-label/:whitelabelId/rag-vector/groups/:groupId
+{ "treeSearchModel": "typesafe/jev-two-stage" }      # null clears it
+```
+
+A group's selector applies to all of its member vectors and overrides theirs.
+
+Jev can also **re-rank** retrieved passages on any vector, not only PageIndex:
+it reads each candidate and puts the ones that state the answer first
+(`divinci rag config <collectionId> --rerank jev`, or `"rerankModel":
+"typesafe/jev"`; `--rerank off` removes it).
+
+### What Jev costs
+
+Both uses are **metered** to the workspace wallet at TypeSafe's published rate,
+with no markup: $0.042 per million input tokens (transaction type `RagJev`).
+
+- **Node selection** reads the corpus's sections, so its cost grows with the
+  corpus: on the nutrition corpus it is roughly 1.9 million input tokens, about
+  **$0.08 per question**, noticeably more than the default selector.
+- **Re-ranking** reads only the retrieved candidates, about **$0.001 per
+  question**.
+
+A call that fails part-way is billed for the tokens it had already used.
+
+## Publishing your own row
+
+A scored-QA run against one of your releases can be published as a TrustRun
+from the run's result page (**Publish to TrustBench**), or with
+`POST /white-label/:whitelabelId/scored-qa/suites/:suiteId/publish-to-trust`.
+
+- Runs are **private by default**. A private run is visible to you and
+  verifiable by you, and is not on any public board.
+- **Going public is a separate, deliberate step:** publish with
+  `visibility: "public"`, or make an existing private run public later with
+  `POST /v1/trustbench/runs/:id/visibility` `{"visibility": "public"}`.
+- Before a run becomes public its outputs are **scanned for personal
+  identifiers** (emails, phone numbers, account ids and similar). A run whose
+  outputs contain one stays private. The scan matches identifier patterns only,
+  so read your outputs before publishing: names and health details pass it.
+- **The same answers are refused a second time.** If the exact answers a run
+  publishes are already public on that board, making it public returns
+  `409 duplicate-answers` with the existing run's id. A **new** run of the same
+  configuration is allowed: it is new evidence, and joins that row's median.
+- The published row describes the retrieval group that **served** the answers,
+  and its judge is the one that actually scored them.
+- **Where a public run appears.** A run of one of the platform benchmarks (for
+  example with `divinci trust run <benchmark> --model <assistant-id> --public`)
+  joins that benchmark's board. A run of **your own** question set becomes its
+  own benchmark, and that board is **private by default**: its public runs can
+  be fetched and verified by anyone who has their ids, but the board is not
+  listed on divinci.ai/trustbench or in `GET /v1/trustbench/public/leaderboard`
+  unless Divinci lists it. Ask us if you want yours listed.
+
+<Aside>
+  A public run cannot be un-signed. Making it private again removes it from the
+  board and the public manifest endpoints, but anyone who already downloaded the
+  manifest can still verify it.
+</Aside>

@@ -1,0 +1,114 @@
+---
+title: Realtime & WebSocket
+description: Subscribe to live chat and transcript updates over auto-reconnecting WebSockets.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The `client.websocket` namespace opens managed WebSocket connections for live
+updates — new messages, transcript changes, and notifications — without polling.
+Connections authenticate with a short-lived ticket, reconnect automatically, and
+expose updates through a small event-emitter API.
+
+## Connecting to a chat
+
+```typescript
+const socket = await client.websocket.connectToChat(thread.id);
+
+const unsubscribe = socket.onMessage.subscribe((event) => {
+  const payload = JSON.parse(event.data);
+  // handle incoming message / status update
+});
+
+// later
+unsubscribe();
+socket.close();
+```
+
+`connectToChat` returns a `ChatWebSocket`. A ticket is fetched and exchanged for
+you under the hood.
+
+## Connecting to a transcript
+
+For workspace transcripts (e.g. audio or owned conversations):
+
+```typescript
+const socket = await client.websocket.connectToTranscript(workspaceId, transcriptId);
+socket.onMessage.subscribe(handleUpdate);
+```
+
+## Connection state and reconnection
+
+Managed sockets track state and reconnect with backoff automatically.
+
+```typescript
+socket.onStateChange.subscribe((state) => {
+  // "connecting" | "open" | "closing" | "closed" | "reconnecting"
+  setConnectionBadge(state);
+});
+
+socket.onReconnecting.subscribe((attempt) => {
+  console.warn(`reconnect attempt ${attempt}`);
+});
+
+socket.onError.subscribe((err) => console.error(err));
+
+console.log(socket.state, socket.isOpen);
+```
+
+Tune reconnection per connection:
+
+```typescript
+const socket = await client.websocket.connectToChat(thread.id, {
+  reconnectDelay: 1000,        // base backoff (ms)
+  maxReconnectAttempts: 10,    // 0 = retry forever
+  debug: true,
+});
+```
+
+<Aside type="note" title="App-level liveness">
+  Divinci's edge strips low-level protocol pings, so liveness is maintained at the
+  application layer. The managed socket handles this for you; just keep the tab
+  active or reconnect on `visibilitychange` if you background long-lived tabs.
+</Aside>
+
+## Event emitters
+
+Every emitter shares the same tiny interface:
+
+```typescript
+const unsubscribe = socket.onMessage.subscribe((data) => { /* ... */ });
+unsubscribe();        // stop listening
+```
+
+| Emitter | Payload | Meaning |
+|---------|---------|---------|
+| `onMessage` | `MessageEvent` | A frame arrived from the server. |
+| `onStateChange` | `WebSocketState` | The connection state changed. |
+| `onReconnecting` | `number` | A reconnect attempt started (with attempt count). |
+| `onError` | `Event` | A socket-level error occurred. |
+
+## Lifecycle and cleanup
+
+```typescript
+socket.close();   // graceful close (no further reconnects)
+socket.destroy(); // close and remove all listeners
+
+// Close everything the manager opened (e.g. on logout / unmount)
+client.websocket.closeAll();
+console.log(client.websocket.connectionCount);
+```
+
+<Aside type="tip">
+  Always `closeAll()` (or `destroy()` each socket) on logout or component unmount
+  to avoid leaking connections and listeners.
+</Aside>
+
+## Low-level access
+
+Need a non-chat path? `getTicket()` and `connect()` let you open an arbitrary
+managed socket with the same reconnection guarantees:
+
+```typescript
+const socket = await client.websocket.connect("/notifications", {}, "notifications");
+```

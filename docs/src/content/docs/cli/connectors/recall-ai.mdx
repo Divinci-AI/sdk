@@ -1,0 +1,76 @@
+---
+title: Recall.ai
+description: Capture meetings across Zoom, Google Meet and Microsoft Teams with a bot notetaker, and ingest the transcripts.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+[Recall.ai](https://docs.recall.ai/) sends a bot into a meeting, records it, and
+returns a speaker-labelled transcript. This connector treats each bot recording
+as a file: the transcript is the content, the recording URL travels as metadata.
+
+Unlike the [Zoom](/cli/connectors/zoom/) connector it is **platform-agnostic** —
+Zoom, Google Meet and Microsoft Teams — and it does not depend on the host
+having cloud recording enabled.
+
+**Shape:** credential — connectable headlessly. **Provider id:** `recall_ai`.
+
+## Credentials
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `apiKey` | ✅ | Recall.ai API key. Sent as `Authorization: Token <key>` |
+| `endpoint` | — | Region base URL. Defaults to `https://us-west-2.recall.ai` |
+
+Recall.ai is regional: a key issued in one region does not work against another
+region's host. If validation fails with a key you know is good, set `endpoint`
+to your region.
+
+## Connect
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/recall_ai/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"credentials":{"apiKey":"…","endpoint":"https://us-west-2.recall.ai"}}'
+```
+
+The key is validated with a one-bot list call before it is stored.
+
+## Settings
+
+| Setting | What it does |
+| --- | --- |
+| `botName` | Display name the bot uses when it joins |
+| `platformFilter` | Only sync recordings from these platforms (`zoom`, `google_meet`, `microsoft_teams`, …) |
+| `requireTranscript` | Skip recordings that have no transcript |
+| `baseUrl` | Region override, as above |
+
+## Sending a bot to a meeting
+
+Divinci can ask Recall.ai to join a meeting for you, and to leave again:
+
+```
+POST /white-label/:whitelabelId/connectors/recall_ai/bot
+POST /white-label/:whitelabelId/connectors/recall_ai/bot/:botId/leave
+```
+
+<Aside type="caution" title="A notetaker bot is a visible participant">
+It appears in the participant list and, in many jurisdictions, recording a
+conversation requires the other participants' consent. Name the bot something
+that makes it obvious what it is.
+</Aside>
+
+## From the CLI
+
+```bash
+divinci connectors status recall_ai
+divinci connectors settings recall_ai --auto-sync on --cadence 60
+divinci connectors sync-status <connectionId>
+divinci connectors disconnect recall_ai
+```
+
+## See also
+
+- [Zoom](/cli/connectors/zoom/) — for Zoom-only capture from the host's own cloud recordings.
+- [Managing connections](/cli/connectors/managing/)

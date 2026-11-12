@@ -1,0 +1,336 @@
+/* Custom styles for Divinci AI SDK documentation */
+
+/* ⚠️ Scope every palette override by theme, and never to a bare `:root`.
+   Starlight ships BOTH its palettes inside `@layer starlight.base`, and an
+   unlayered rule outranks every layer regardless of specificity — so a bare
+   `:root` here overrides Starlight's LIGHT theme as well, and light mode
+   silently renders the dark palette on a light background. `:not([light])`
+   rather than `[data-theme="dark"]` so the pre-hydration paint, where no
+   data-theme attribute exists yet, is still dark. */
+:root:not([data-theme="light"]) {
+  --sl-color-accent-low: #0d1b2a;
+  --sl-color-accent: #4f46e5;
+  --sl-color-accent-high: #818cf8;
+  --sl-color-white: #e0e1dd;
+  --sl-color-gray-1: #c8d5e0;
+  --sl-color-gray-2: #a8bfd5;
+  --sl-color-gray-3: #778da9;
+  --sl-color-gray-4: #415a77;
+  --sl-color-gray-5: #1b263b;
+  --sl-color-gray-6: #141e30;
+  --sl-color-black: #0d1b2a;
+}
+
+/* Midnight theme background — matches the Divinci Web app midnight preset */
+html {
+  background: linear-gradient(160deg, #0d1b2a 0%, #141e30 30%, #1b263b 55%, #141e30 80%, #0d1b2a 100%);
+  background-attachment: fixed;
+  /* The splash hero's orbit ring / courier canvas / satellites bleed beyond
+     the content column by design. Clip horizontal overflow at the root so that
+     bleed (and any speech bubble near the edge) never spawns a horizontal
+     scrollbar. `clip` (not `hidden`) avoids creating a scroll container, so the
+     vertical page scroll and Starlight's sticky sidebar are unaffected. */
+  overflow-x: clip;
+}
+
+/* ── Apple-style glassmorphism on all content panels ────────────────────
+   Semi-transparent panels with backdrop-filter blur let the fractal
+   background peek through frosted glass.  Everything sits above the
+   fractal canvas (z-index 9999) so the blur captures it. */
+:root {
+  --glass-bg: rgba(13, 27, 42, 0.55);
+  --glass-bg-strong: rgba(13, 27, 42, 0.65);
+  --glass-bg-sidebar: rgba(20, 30, 48, 0.6);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-blur: blur(16px);
+  --glass-blur-sm: blur(10px);
+  --panel-bg: rgba(27, 38, 59, 0.35);
+}
+
+/* ── Light mode ─────────────────────────────────────────────────────────
+   Flat cream (#f8f4f0) surfaces. The glass stack is a DARK-mode treatment
+   — it exists so the fractal canvas shows through frosted panels — so in
+   light mode every glass var collapses to the one opaque cream tone and
+   every blur to `none`. That keeps the rules below theme-agnostic: they
+   read the vars, they don't branch on the theme. */
+:root[data-theme="light"] {
+  --cream-bg: #f8f4f0;
+
+  --glass-bg: var(--cream-bg);
+  --glass-bg-strong: var(--cream-bg);
+  --glass-bg-sidebar: var(--cream-bg);
+  --glass-border: rgba(13, 27, 42, 0.1);
+  --glass-blur: none;
+  --glass-blur-sm: none;
+  /* Translucent white rather than a flat fill, so panels fog over cream the
+     way they fog over midnight. No blur: with a flat backdrop there is
+     nothing to blur, and it would cost a compositing layer per card. */
+  --panel-bg: rgba(255, 255, 255, 0.45);
+
+  /* Brand palette, light-theme values. Same navy hue family as dark mode,
+     inverted and warmed slightly so borders and subtle fills sit on cream
+     rather than on white. Starlight derives --sl-color-text, hairlines and
+     inline-code backgrounds from these, so they follow automatically. */
+  --sl-color-accent-low: #dfe0fb;
+  --sl-color-accent: #4f46e5;
+  --sl-color-accent-high: #312e81;
+  --sl-color-white: #14212e;
+  --sl-color-gray-1: #1f2c3a;
+  --sl-color-gray-2: #33445a;
+  --sl-color-gray-3: #5b7089;
+  --sl-color-gray-4: #8b9bad;
+  --sl-color-gray-5: #cdc9c4;
+  --sl-color-gray-6: #ece7e1;
+  --sl-color-gray-7: #f3efea;
+  --sl-color-black: #ffffff;
+
+  /* Starlight surfaces — header, sidebar and page body all sit on cream */
+  --sl-color-bg: var(--cream-bg);
+  --sl-color-bg-nav: var(--cream-bg);
+  --sl-color-bg-sidebar: var(--cream-bg);
+
+  /* Replaces the midnight gradient on <html> (higher specificity wins) */
+  background: var(--cream-bg);
+  background-attachment: initial;
+}
+
+:root[data-theme="light"] body {
+  background: var(--cream-bg);
+}
+
+:root[data-theme="light"] .page {
+  background: var(--cream-bg);
+}
+
+/* The sacred-geometry canvas is tuned for a midnight backdrop; on cream it
+   reads as smudge at full strength, so halve it rather than lose it. */
+:root[data-theme="light"] #sdk-fractal-bg {
+  opacity: 0.5;
+}
+
+/* The hero's orbit scrim is a near-opaque midnight disc that vanishes into
+   the dark backdrop; on cream it reads as a black hole. Same gradient, cream
+   stops, so it fades out the same way here. */
+:root[data-theme="light"] .sdk-orbit-scrim {
+  background: radial-gradient(circle at center,
+    rgba(248, 244, 240, 0.99) 0%,
+    rgba(248, 244, 240, 0.97) 40%,
+    rgba(248, 244, 240, 0.74) 60%,
+    rgba(248, 244, 240, 0) 80%);
+}
+
+:root[data-theme="light"] .model-list-search {
+  color: var(--sl-color-black);
+  background: rgba(13, 27, 42, 0.03);
+}
+
+/* Page wrapper — outermost glass layer */
+.page {
+  position: relative;
+  z-index: 10000;
+}
+
+/* Main content frame */
+.main-frame {
+  background: transparent;
+}
+
+/* Content panels (individual sections on a page) */
+.content-panel {
+  background: var(--panel-bg);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  /* Load-bearing: the hero visual inside this panel sits at z-index -1, and a
+     negative-z descendant paints beneath the nearest STACKING CONTEXT's
+     background. In dark mode `backdrop-filter` happens to create one, so the
+     orbit lands above this panel's fill; in light mode the blur is `none`, so
+     without this the orbit escaped to .page and got washed out by the panel's
+     45% white. `isolate` makes the context unconditional and theme-independent. */
+  isolation: isolate;
+}
+
+/* Cards and link cards — same fogged glass as .content-panel rather than the
+   flat `background-color: var(--sl-color-black)` fill Starlight ships. Its
+   rule lives in `@layer starlight.components`, so this unlayered one wins
+   without needing extra specificity. `background-color` (not `background`)
+   so a card's border-radius and shadow are untouched. */
+.card,
+.sl-link-card {
+  background-color: var(--panel-bg);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+}
+
+/* Sidebar — stronger glass to keep nav readable */
+.sidebar-pane,
+.sidebar-content {
+  background: var(--glass-bg-sidebar);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
+/* Right sidebar (table of contents) */
+.right-sidebar-container,
+.right-sidebar-panel {
+  background: var(--glass-bg-sidebar);
+  backdrop-filter: var(--glass-blur-sm);
+  -webkit-backdrop-filter: var(--glass-blur-sm);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+/* Page header. `sticky` (not `fixed`) keeps it in normal flow — the hero's
+   spacing assumes the header occupies its own height (see Hero.astro) — while
+   still pinning it to the top as the page scrolls. It needs an opaque
+   background so content doesn't show through while pinned. */
+.page > header {
+  position: sticky;
+  top: 0;
+  z-index: 10001;
+  background: var(--sl-color-bg-nav, var(--sl-color-bg));
+}
+
+/* Override Starlight's default opaque sidebar background so glass shows */
+[data-theme="dark"] {
+  --sl-color-bg-sidebar: transparent;
+}
+
+/* Hero section — just needs position for its own stacking context */
+.sdk-hero {
+  position: relative;
+}
+
+/* Dark mode adjustments */
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #1b263b;
+  --sl-color-accent: #818cf8;
+  --sl-color-accent-high: #a5b4fc;
+}
+
+/* Code block styling */
+.expressive-code {
+  margin: 1rem 0;
+}
+
+/* Card hover effects */
+.card:hover {
+  transform: translateY(-2px);
+  transition: transform 0.2s ease;
+}
+
+/* ── Fully-clickable cards (homepage "Choose Your SDK") ─────────────────
+   Stretched-link pattern: each card contains exactly one link; its
+   ::after covers the whole card, so anywhere on the card navigates. */
+.clickable-cards .card {
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.clickable-cards .card a {
+  position: static; /* anchor the ::after to the card, not the link */
+}
+.clickable-cards .card a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.clickable-cards .card:hover {
+  border-color: var(--sl-color-accent);
+  box-shadow: 0 6px 22px rgba(129, 140, 248, 0.20);
+  transform: translateY(-2px);
+}
+/* Starlight's `stagger` offsets every 2nd card DOWN with transform:
+   translateY(5rem) (var --stagger-height). A plain hover transform would
+   REPLACE that offset and snap the card ~5rem up. So for staggered (even)
+   cards, fold the 2px lift into the existing offset instead of clobbering it.
+   The 0px fallback keeps the lift correct on the mobile single-column layout
+   where stagger (and --stagger-height) is off. */
+.clickable-cards .stagger > .card:nth-child(2n):hover {
+  transform: translateY(calc(var(--stagger-height, 0px) - 2px));
+}
+.clickable-cards .card a:focus-visible::after {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+/* Table styling */
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid var(--sl-color-gray-5);
+}
+
+th {
+  font-weight: 600;
+  background: var(--sl-color-gray-6);
+}
+
+/* Improve readability */
+.sl-markdown-content {
+  line-height: 1.7;
+}
+
+/* ── Model catalog page (guides/models) ───────────────────────────── */
+.model-list-island {
+  margin: 1.5rem 0 2.5rem;
+}
+.model-list-search {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+  color: var(--sl-color-white);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  outline: none;
+}
+.model-list-search:focus {
+  border-color: var(--sl-color-accent);
+}
+.model-list-meta {
+  margin: 0.75rem 0;
+  color: var(--sl-color-gray-2);
+  font-size: 0.9rem;
+}
+.model-list-meta code,
+.model-list-foot code {
+  background: var(--sl-color-gray-6);
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.3rem;
+}
+.model-list-table code {
+  background: transparent;
+  padding: 0;
+  color: var(--sl-color-accent-high);
+}
+.model-list-name {
+  margin-top: 0.25rem;
+  color: var(--sl-color-gray-1);
+  font-weight: 600;
+}
+.model-list-notes {
+  margin-top: 0.25rem;
+  color: var(--sl-color-gray-3);
+  font-size: 0.85rem;
+}
+.model-list-empty {
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--sl-color-gray-3);
+  border: 1px dashed var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+}
+.model-list-foot {
+  margin-top: 1.5rem;
+  font-size: 0.85rem;
+  color: var(--sl-color-gray-3);
+}

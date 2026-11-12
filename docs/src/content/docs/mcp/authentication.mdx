@@ -1,0 +1,87 @@
+---
+title: Authentication
+description: Sign in to the Divinci MCP server with the Auth0 PKCE browser flow.
+---
+
+import { Steps, Aside } from "@astrojs/starlight/components";
+
+The Divinci MCP server authenticates with **Auth0** using the OAuth 2.0
+Authorization Code flow with **PKCE** — the right flow for public clients like
+browsers and desktop apps. There is no API key.
+
+## Configuring auth
+
+Pass an `auth` block when constructing the client:
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+  auth: {
+    auth0Domain: "divinci.us.auth0.com",
+    auth0ClientId: "your-spa-client-id",
+    redirectUri: window.location.origin + "/callback",
+    // scopes default to: ["openid", "profile", "email", "offline_access"]
+  },
+});
+```
+
+## The browser flow
+
+<Steps>
+
+1. **Send the user to Auth0.** Generate the authorization URL (PKCE challenge is
+   handled internally) and redirect.
+   ```typescript
+   const url = await mcp.getAuthUrl(/* optional state */);
+   window.location.href = url;
+   ```
+
+2. **Handle the callback.** Auth0 redirects back with a `code`. Exchange it for
+   tokens.
+   ```typescript
+   const code = new URLSearchParams(location.search).get("code")!;
+   await mcp.handleAuthCallback(code);
+   ```
+
+3. **Connect.** The client now has an access token; connect and use tools.
+   ```typescript
+   await mcp.connect();
+   console.log(await mcp.isAuthenticated()); // true
+   ```
+
+</Steps>
+
+## Sign out
+
+```typescript
+await mcp.logout();                 // clears stored tokens
+const url = mcp.getLogoutUrl("/");  // optional Auth0 logout redirect
+window.location.href = url;
+```
+
+## Token storage
+
+By default tokens live in memory, so they're lost on page reload. Access tokens
+auto-refresh from the refresh token while the session is valid. For persistence
+across reloads, supply a custom `TokenStorage` implementation (the `Auth0Handler`
+accepts one):
+
+```typescript
+import { type TokenStorage } from "@divinci-ai/mcp";
+
+const storage: TokenStorage = {
+  async getAccessToken() { return localStorage.getItem("mcp_at"); },
+  async setAccessToken(t, expiresAt) { localStorage.setItem("mcp_at", t); },
+  async getRefreshToken() { return localStorage.getItem("mcp_rt"); },
+  async setRefreshToken(t) { localStorage.setItem("mcp_rt", t); },
+  async clear() { localStorage.removeItem("mcp_at"); localStorage.removeItem("mcp_rt"); },
+};
+```
+
+<Aside type="caution">
+  Persisting tokens in `localStorage` is convenient but exposes them to XSS. For
+  sensitive deployments, prefer in-memory storage with a silent re-auth on
+  reload, or a backend-for-frontend that holds the tokens.
+</Aside>

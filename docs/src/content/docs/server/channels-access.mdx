@@ -1,0 +1,291 @@
+---
+title: "Channels & Access"
+description: "Configure who reaches a Release and how — voice providers, testing domains, the MCP endpoint, the skill/tool loop, anonymous chat, the free-chat gate, and paid pricing tiers."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+**Channels & Access** is the last group of Release settings: it decides *how*
+people and machines reach a Release, and *what they're allowed to spend* once
+they do. Everything else on a Release — model, knowledge, safety, messaging —
+describes the assistant. This group describes its doors.
+
+Seven settings sit in this group, in the order the dashboard presents them:
+
+| Setting | Release field | Answers |
+| --- | --- | --- |
+| [Text-to-speech / speech-to-text](#voice-tts--stt) | `ttsToolOverride`, `ttsVoiceOverride`, `sttToolOverride` | Which voice speaks, which transcriber listens |
+| [Testing domains](#testing-domains) | `testingDomains` | Which origins chat without burning quota |
+| [MCP server](#mcp-server) | `mcpConfig` | Which AI agents get programmatic access |
+| [Skills](#skills-the-tool-loop) | `skillConfig` | Which tools the model may call mid-conversation |
+| [Anonymous chat](#anonymous-chat) | `allowAnonymousChat` | Whether strangers can chat without logging in |
+| [Free-chat gate](#free-chat-gate) | `freeChatGate` | What they must prove before they do |
+| [Pricing tiers](#pricing-tiers) | `pricingTiers` | What paying members may spend |
+
+<Aside type="note" title="Use `updateInWorkspace`, not `update`">
+Every field on this page is set through
+`releases.updateInWorkspace(workspaceId, releaseId, options)`, which GET-then-
+merges the full Release document before saving. The plain `update(releaseId,
+options)` method hits the v1 consumer endpoint, which requires a full body and
+rejects partial payloads.
+
+`sttToolOverride` and `pricingTiers` reached the SDK later than their siblings —
+if you are pinned to an older `@divinci-ai/server` they are dropped silently
+rather than erroring, so upgrade before relying on them.
+</Aside>
+
+## Voice: TTS & STT
+
+Text-to-speech picks the voice your assistant speaks in; speech-to-text picks
+the engine that transcribes the user. Both are **per-Release overrides** — unset,
+they inherit the workspace default.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  ttsToolOverride: "cloudflare-aura-2",
+  ttsVoiceOverride: "aura-2-draco-en",
+  sttToolOverride: "deepgram-nova-3",
+});
+```
+
+<Aside type="caution" title="Send tool and voice together">
+`ttsVoiceOverride` is only meaningful for the tool that owns it. Setting one
+without the other can pair a voice id with a provider it doesn't belong to.
+Send both, or neither. Pass `null` to clear an override and re-inherit the
+workspace default.
+</Aside>
+
+**Provider keys.** Cloudflare-hosted options are served on the platform's own
+key — pick one and it works. Third-party providers that bill you directly
+(OpenAI Whisper, Deepgram Nova-3, ElevenLabs, Cartesia) require **your own API
+key**, registered on the workspace first; the key form adapts to whatever fields
+that specific provider needs. A Release pointed at a provider you haven't keyed
+will not produce audio. See
+[Provider Keys (BYOK)](/server/byok-and-skills/#byok-your-own-provider-keys).
+
+TTS tool ids: `browser-local`, `cloudflare-aura-1`, `cloudflare-aura-2`,
+`cloudflare-melotts`, `vertex-ai-standard`, `vertex-ai-neural2`,
+`vertex-ai-chirp3`, `vertex-ai-studio`, `cartesia-sonic`, `elevenlabs-tts`,
+`openai-tts`, `deepgram-tts`.
+
+STT tool ids: `@cf/openai/whisper-large-v3-turbo` (platform key),
+`@openai/whisper-1` and `deepgram-nova-3` (your key).
+
+For phone calls specifically, the TTS provider you can reach is constrained by
+the Twilio transport — see [Voice, Phone & SMS](/guides/voice-phone/).
+
+## Testing domains
+
+A **testing domain** is an origin whose messages **don't count against your
+usage quota**. That's the whole feature: it exists so a staging site or a
+localhost build can be exercised freely without consuming the allowance meant
+for real visitors.
+
+It is unrelated to the voice settings above it in the form, and unrelated to
+CORS — it is a quota exemption, not an access grant.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  testingDomains: [
+    "staging.example.com",   // exact host
+    "*.dev.example.com",     // wildcard — one label
+    "localhost",             // local development
+    "127.0.0.1",
+  ],
+});
+```
+
+Three pattern forms are accepted: an **exact** host, a **wildcard** (`*.` plus a
+domain, matching one leading label), and the literals `localhost` / `127.0.0.1`.
+The list **replaces** the stored one — send the full set, and set it before
+publishing, since a published Release is locked for draft edits.
+
+<Aside type="caution" title="Testing mode is not a free-usage backdoor">
+The exemption is granted only when the request's `X-Embed-Origin` matches the
+browser's own `Origin` header — a forbidden header JavaScript cannot forge. A
+mismatch is logged as a spoofing attempt and the request falls through to normal
+quota. Activations are additionally rate-limited per Release + IP per hour. So
+publishing your production domain here does not buy unmetered chat; it just
+stops the exemption from meaning anything.
+</Aside>
+
+## MCP server
+
+Publishing a Release as an MCP server hands another AI agent programmatic access
+to it — the same tools your chat assistant has, exposed over the Model Context
+Protocol. Configure it on `mcpConfig`; the full field table, endpoint URL and
+authentication modes live on
+[Release as an MCP Server](/mcp/whitelabel-servers/) and
+[Releases → MCP server config](/server/releases/#mcp-server-config).
+
+Two settings in this section are worth calling out here, because both are easy
+to get backwards.
+
+<Aside type="caution" title="An empty tool checklist exposes EVERYTHING">
+`exposedTools` is an allowlist, and **empty means unrestricted** — not
+"nothing". Leaving every tool unchecked exposes every tool the Release has. To
+limit access you must explicitly list the tools you *do* want; anything you omit
+from a non-empty list is then excluded. This is the one control in this group
+that reads backwards from the obvious.
+</Aside>
+
+`maxSpendPerTokenCents` caps how much a **single** MCP token can spend before it
+stops working (default `1000` = $10.00). It is your blast-radius limit if a
+credential leaks — set it to the smallest number a legitimate consumer needs.
+
+## Skills (the tool loop)
+
+`skillConfig` is the master switch for **tool calling**: with it enabled, a
+qualifying turn runs a loop — call model, execute tool, feed the result back —
+letting the assistant search, fetch, or take actions mid-conversation instead of
+answering from the prompt alone.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  skillConfig: {
+    enabled: true,
+    maxToolIterations: 5,
+    catalogSkills: { "6a67afca5599956295482dfc": ["sendEmail"] },
+    mcpSkills: { "6a72d8ae5c76b78e24589e85": [] }, // [] = all of that server's tools
+    toolCallingAssistant: { id: "@cf/moonshotai/kimi-k2.7-code" },
+  },
+});
+```
+
+| Field | Meaning |
+| --- | --- |
+| `enabled` | Master switch. While `false` the loop never runs, whatever skills are attached. |
+| `catalogSkills` | Map of skill **instance** id → the action names it may run. `[]` = all of that skill's actions. |
+| `mcpSkills` | Map of connected MCP-server id → the tool ids exposed. `[]` = all of that server's active tools. |
+| `toolCallingAssistant` | The model that runs the tool loop. |
+| `fallbackToolCallingAssistants` | Ordered retry chain when the tool model returns a retryable failure. |
+| `maxToolIterations` | Hard ceiling on tool-call rounds in a single turn. |
+
+**Tools come from two places.** *Skills* are Divinci's built-in third-party
+integrations — some, like web search, connect in one click with no OAuth.
+*MCP skills* are external MCP servers you connect with OAuth or a static API
+key. Once either is connected, each of its actions or tools becomes
+individually selectable here.
+
+**The tool-calling assistant can differ from the answering model.** Point it at
+a separate model and tool results are handed back to your primary assistant,
+which composes the final reply — so a cheap tool-capable model can drive the
+loop while your preferred model does the writing. When you enable the loop
+without naming one, it defaults to the Release's own primary assistant, which
+must then itself support native tool calling or the save is rejected.
+
+<Aside type="note" title="skillConfig merges; it does not replace">
+The server merges `skillConfig` shallowly over the stored value, so sending only
+`catalogSkills` leaves `enabled` and `toolCallingAssistant` intact. Catalog skill
+ids are **instance** ids (not catalog `integrationId`s), and the instance must be
+ready and owned by the same workspace or the save is rejected.
+</Aside>
+
+## Anonymous chat
+
+Lets people talk to the Release without logging in, with a hard cap on message
+count per conversation. Three fields control it — `allowAnonymousChat`,
+`maxAnonymousChatMessages`, `requireSignedAnonymousChat` — documented in full at
+[Releases → Anonymous chat](/server/releases/#anonymous-chat).
+
+It is also the **prerequisite for the next section**: the free-chat gate has
+nothing to gate until anonymous chat is on, which is why the dashboard only
+reveals it once you enable this.
+
+## Free-chat gate
+
+The verification layer in front of anonymous chat: a Turnstile CAPTCHA, and
+optionally email verification, plus per-email and per-device quotas — all
+enforced before any message reaches the model.
+
+Four modes: `none`, `captcha-only`, `captcha+otp`, `captcha+magic-link`.
+`captcha-only` uses Divinci's platform-managed Turnstile widget with no setup at
+all; bring your own Cloudflare widget by supplying a sitekey and a secret
+*reference* instead. Higher modes add OTP or magic-link email verification on
+top.
+
+Modes, quota knobs, and the platform-vs-BYO Turnstile split are documented at
+[Security & Abuse Protection → Free-chat gate](/server/security/#free-chat-gate-cloudflare-turnstile).
+
+## Pricing tiers
+
+Pricing tiers define **paid, spend-based membership levels for this specific
+Release**. Each tier grants its members a spend allowance per time window; an
+end user pays via Stripe to move up a tier. The Release owner's wallet still
+funds inference — a tier unlocks *how much* a member may consume, it does not
+change who pays the provider.
+
+<Aside type="caution" title="Release tiers override the workspace tier set entirely">
+Define even one tier here and this set **replaces** the workspace's default tier
+set for this Release — it does not merge with it or extend it. A Release with
+tiers is governed only by its own.
+</Aside>
+
+Each tier carries a slug, a display name, an order, an optional `priceCents`
+(omitted or `0` = a free tier, not purchasable), and one or more **spend
+windows**. A window is a duration plus a spend ceiling — hourly, daily, weekly,
+monthly, or unlimited. Exactly one tier should set `isDefault: true`; that's
+where a logged-in-but-unpaid user lands.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  pricingTiers: [
+    {
+      slug: "free",
+      name: "Free",
+      order: 0,
+      isDefault: true,
+      // 1 day, $1.00 — limits are nano-USD decimal STRINGS, not numbers
+      windowValidations: [{ durationMs: 86_400_000, limitNanoUSD: "1000000000" }],
+    },
+    {
+      slug: "pro",
+      name: "Pro",
+      order: 1,
+      priceCents: 2900,
+      currency: "usd",
+      windowValidations: [{ durationMs: 86_400_000, limitNanoUSD: "25000000000" }],
+    },
+  ],
+});
+```
+
+<Aside type="note" title="`limitNanoUSD` is a string on purpose">
+Nano-USD exceeds JS number precision at real dollar amounts, so a window's limit
+travels as a **decimal string** and is parsed to a bigint only at enforcement
+time. `"-1"` means unlimited. Passing a number here is the kind of mistake that
+surfaces as a spend ceiling that is merely slightly wrong — which nobody reads
+as a bug. Pass `null` (or `[]`) to clear the set and restore the workspace tiers.
+</Aside>
+
+<Aside type="danger" title="A price is not purchasable until you sync it">
+Setting `priceCents` does **not** create anything at Stripe. Save the Release,
+then run **Sync prices** — it creates or refreshes the Stripe Product and
+recurring Price for each priced tier and writes `stripeProductId` /
+`stripePriceId` back onto the tier. Until `stripePriceId` exists, a customer
+**literally cannot check out** on that tier, and nothing in the editor says so.
+Skipping this step is the single most common way a tier set ships dead.
+
+```bash
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/pricing-tiers/sync \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+The response reports `synced` (with each tier's new `stripePriceId`) and
+`skipped` with a reason per tier — free tiers are skipped by design.
+</Aside>
+
+## After Channels & Access
+
+That's the last group. Once saved, the Release is fully configured, and from
+here you can:
+
+- **Keep editing** — every change bumps the version.
+- **Fork it into a fresh draft** — leaves the live Release serving traffic while
+  you work.
+- **Deprecate it** when it's time to retire.
+
+See [Releases → Lifecycle](/server/releases/#lifecycle) for the publish, fork and
+deprecate endpoints — and for why the SDK's `activate()` / `archive()` are not
+the way to do any of it.

@@ -1,0 +1,107 @@
+---
+title: Client SDK Overview
+description: The headless, browser-safe TypeScript SDK for building custom chat UIs.
+---
+
+import { Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+`@divinci-ai/client` is a headless, browser-compatible SDK. It gives you chat
+threads, token-by-token streaming, realtime WebSockets, and per-user RAG — and
+leaves the UI entirely to you. Use it to build a chat experience in React, Vue,
+Svelte, or vanilla JS.
+
+## Features
+
+- Thread-based chat with streaming and non-streaming sends
+- Realtime updates over auto-reconnecting WebSockets
+- Rich, typed error hierarchy ([Error Handling](/getting-started/error-handling))
+- Pluggable token storage and three identity models ([Authentication](/getting-started/authentication))
+- A wide namespace surface — RAG, audio, notifications, API keys, arena, and more
+- First-class TypeScript types from `@divinci-ai/types`
+
+## Installation
+
+```bash
+npm install @divinci-ai/client
+```
+
+## Basic usage
+
+The client is thread-oriented: create (or reuse) a thread, then send messages
+into it.
+
+```typescript
+import { DivinciClient } from "@divinci-ai/client";
+
+const client = new DivinciClient({
+  releaseId: "rel_your-release-id",
+  userToken: jwtFromYourBackend, // or apiKey + externalUser — see Authentication
+});
+
+const thread = await client.chat.create();
+
+const response = await client.chat.send(thread.id, "Hello!");
+console.log(response.message.content);
+```
+
+<Aside type="caution">
+  `chat.send()` and `chat.stream()` take the **thread id first**:
+  `send(chatId, content, options?)`. There is no top-level
+  `client.chat.send("text")` — you always send into a thread.
+</Aside>
+
+## Configuration options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `releaseId` | `string` | — | **Required.** The Release the chat runs against. |
+| `apiKey` | `string` | — | API key (pair with `externalUser` outside a browser). |
+| `userToken` | `string` | — | Short-lived user **access** token (see [Authentication](/getting-started/authentication/)); wrapped in a `SimpleTokenStorage`. |
+| `externalUser` | `ExternalUserConfig` | — | End-user identity for attribution. |
+| `tokenStorage` | `TokenStorage` | — | Custom token persistence + refresh. |
+| `origin` | `string` | — | Browser origin sent to `/embed/validate-login` during automatic token refresh (v0.5.0+). Must be in the API key's `allowedOrigins`. Required for `setRefreshToken()` auto-refresh. |
+| `workspaceId` | `string` | — | Default workspace for namespace calls. |
+| `baseUrl` | `string` | `https://api.divinci.app` | API origin. |
+| `wsBaseUrl` | `string` | `wss://live.divinci.app` | WebSocket origin. |
+| `streaming` | `boolean` | `true` | Default streaming behavior. |
+| `timeout` | `number` | `30000` | Request timeout (ms). |
+| `maxRetries` | `number` | `3` | Automatic retries for transient failures. |
+| `apiVersion` | `string` | — | API version header (`X-API-Version`); sent only when set. |
+| `headers` | `Record<string,string>` | — | Extra headers on every request. |
+| `debug` | `boolean` | `false` | Verbose logging. |
+
+## Client methods
+
+Beyond the namespaces, the `DivinciClient` instance exposes:
+
+| Method | Description |
+|--------|-------------|
+| `getRelease()` / `refreshRelease()` | Fetch (or re-fetch) the Release config. |
+| `setToken(token, expiresAt?)` | Store a user token. |
+| `setRefreshToken(token)` | Store an `/embed/login` refresh token. With `origin` configured, the client exchanges it via `/embed/validate-login` for a fresh access token automatically on 401 (v0.5.0+). |
+| `logout()` | Clear stored tokens. |
+| `isAuthenticated()` | Whether a usable token is present. |
+| `validateApiKey()` | Verify the configured API key. |
+| `setExternalUser(user)` | Set/replace the external-user identity. |
+| `withWorkspace(id)` | Return a client scoped to a workspace. |
+| `getConfig()` / `getHttpClient()` | Escape hatches for advanced use. |
+
+## Namespaces
+
+The client groups operations into lazily-initialized namespaces:
+
+`chat`, `homepageChat`, `anonymousChat`, `freeChatGate`, `siteControl`, `terms`,
+`rag`, `arena`, `websocket`, `audio`, `user`, `apiKeys`, `byok`, `stylePattern`,
+`fineTune`, `notifications`, `analytics`, `metrics`, and `feedback`.
+
+The most common ones are covered in their own pages; the rest are summarized in
+[Namespaces](/client/namespaces).
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Chat" href="/client/chat" description="Threads, sending, history, and feedback." />
+  <LinkCard title="Streaming" href="/client/streaming" description="Token-by-token responses with callbacks." />
+  <LinkCard title="Realtime & WebSocket" href="/client/realtime" description="Live updates with auto-reconnect." />
+  <LinkCard title="RAG & Vectors" href="/client/rag" description="Query and manage vector indexes." />
+</CardGrid>

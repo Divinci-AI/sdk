@@ -1,0 +1,51 @@
+---
+title: Search & Scraping
+description: Web search providers (Brave, Exa, Serper) and the scraping cascade (fetch, Firecrawl, Cloudflare Browser Rendering).
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import ToolCatalogTable from "../../../components/ToolCatalogTable.astro";
+
+## Web search
+
+Backs the `web-search` skill in the [tool loop](/server/tools/).
+
+<ToolCatalogTable type="Search/WebSearch" />
+
+All three are BYOK. They differ in what they are good at: **Serper** proxies
+Google results, **Brave** returns an independent index, and **Exa** is
+embedding-based — it finds pages that are semantically like a description rather
+than pages containing your keywords. For "find me more pages like this one", Exa
+is the one that behaves the way you want.
+
+Provider health is tracked, so a provider erroring or rate-limiting does not
+take the skill down with it.
+
+## Scraping
+
+Backs crawls, the `scrape-url` skill, and the web-crawl connector.
+
+<ToolCatalogTable type="URL/Scraper" />
+
+They form a **cascade**, cheapest first:
+
+1. **`@divinci-ai/fetch-scraper`** — a plain HTTP fetch. Handles the majority of
+   pages, costs nothing, no third party involved.
+2. **Firecrawl** — for pages that need rendering or that reject naive clients.
+   Available on Divinci's account (`@divinci-ai/firecrawl`) or on your own key
+   (`@mendable/firecrawl`).
+3. **Cloudflare Browser Rendering** — a real browser, for pages that only exist
+   after JavaScript runs.
+
+<Aside type="caution" title="A page that renders in your browser may still be empty to a scraper">
+Content injected by client-side JS, or behind a login, returns a page that looks
+successful and contains no substance. A crawl that reports pages fetched but
+produces almost no chunks is nearly always this. The gated-content detector
+flags the common shape of it; member-gated sites need scrape authentication on
+the [web-crawl connector](/cli/connectors/web-crawl/).
+</Aside>
+
+## See also
+
+- [Web Crawl connector](/cli/connectors/web-crawl/)
+- [Tool Catalog](/server/tools/) — the `web-search` and `scrape-url` skills.

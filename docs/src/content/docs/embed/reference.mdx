@@ -1,0 +1,344 @@
+---
+title: Embed Client Reference
+description: Full attribute, config, and DivinciChat API reference
+---
+
+
+This page is the full surface area of the embed script. Use the [Overview](/embed/overview) for install and orientation; this page is the lookup table.
+
+## Script attributes (auto-mount)
+
+These attributes are read off the `<script>` tag itself. Unknown `divinci-*` / `data-divinci-*` / known `data-experiment-*` attributes produce a console warning, so typos surface quickly during integration.
+
+| Attribute | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `divinci-release-id` | string (8–64 alphanumeric) | Yes (auto-mount) | The release that drives the chat. Required to auto-mount; if omitted, the script loads but does not create a default chat. |
+| `data-global-name` | string | No | Name of the `window` global the script exposes. Default `"DIVINCI_AI"`. |
+| `css-src` | URL | No | Publicly-reachable stylesheet URL passed into the iframe for theming. Must be a parseable URL. |
+| `debug` | flag | No | When present (or `="true"`), enables verbose console logs in the embed script and forwarded into the iframe. |
+| `divinci-external-user` | flag or JWT string | No | `true` or empty value enables external-login mode (you'll call `chat.auth.login(jwt)`). Passing a JWT value enables external login *and* logs in immediately on auto-mount. |
+| `product-recommendations` | flag | No | Enable inline product recommendation UI inside chat. |
+| `metrics` | flag | No | Enable in-chat metrics surfacing. |
+| `help-requests` | flag | No | Enable help-request CTAs. |
+| `notifications` | flag | No | Enable notification surfacing inside the embed. |
+| `context-bubbles` | flag | No | Render RAG context bubbles next to assistant messages. |
+| `message-feedback` | flag | No | Show thumbs-up/down and a feedback dropdown on assistant replies. |
+| `quick-menu` | flag | No | Enable the in-chat quick menu. |
+| `share-chat` | flag | No | Enable share-this-chat affordance. |
+| `hide-login` | flag | No | Hide the Login button in the hamburger menu. **Paid-plan only** — see [Menu-item removal](#menu-item-removal-paid-plans). |
+| `hide-ai-info` | flag | No | Hide the "AI Info" link in the hamburger menu. **Paid-plan only** — see [Menu-item removal](#menu-item-removal-paid-plans). |
+| `read-aloud` | flag | No | Show a browser-native "read aloud" button on assistant messages. Uses the browser's own `speechSynthesis` — no server TTS, no cost, and it works for anonymous visitors. |
+| `seo-badge` | flag | No | Render the "Powered by Divinci" attribution into **your page's** DOM instead of inside the chat iframe. See [Host-page SEO surface](#host-page-seo-surface). |
+| `seo-faq` | flag | No | Render a crawlable Q&A block plus `FAQPage` structured data into **your page's** DOM. Requires a `<div data-divinci-faq>` mount point and published content for the release. See [Host-page SEO surface](#host-page-seo-surface). |
+| `data-experiment-id` | string | No | Experiment identifier. When set with a variant, the embed reports the assignment. |
+| `data-experiment-variant` | `"control"` \| `"treatment"` | No | Assigned variant for the experiment. Unknown values are ignored. |
+
+**Flag values:** an attribute being *present* (with no value, `="true"`, or any non-`"false"` value) is treated as enabled. Only `="false"` disables it.
+
+### Menu-item removal (paid plans)
+
+`hide-login` and `hide-ai-info` let you trim the hamburger menu down to just what your end users need. They're **only honored when your release's plan allows branding removal** — the same server-resolved gate that controls the "Powered by Divinci" footer. On plans without that entitlement, the flags are silently ignored and the full menu renders as usual; there's no client-side way to bypass the gate by setting the attributes yourself.
+
+```html
+<script src="https://embed.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+  hide-login
+  hide-ai-info
+></script>
+```
+
+:::caution[`hide-divinci` is not a script attribute]
+Earlier versions of this page listed a `hide-divinci` flag. The embed script does
+not read it — setting it produces an `Unknown script attribute "hide-divinci"`
+console warning and nothing else. The Divinci branding link is already removed
+automatically on plans that allow branding removal, so there is nothing to opt
+into. The `hideDivinci` option in [`CreateDivinciChatOptions`](#createdivincichatoptions)
+is likewise accepted and inert.
+:::
+
+## Host-page SEO surface
+
+The chat runs in a cross-origin `<iframe>`. That is good for isolation and it
+has one consequence worth being explicit about: **anything rendered inside the
+iframe is attributed by search engines to `embed.divinci.app`, not to your
+page.** The "Powered by Divinci" badge has always lived in there, so it has
+never contributed anything to the embedding site.
+
+`seo-badge` and `seo-faq` opt into rendering into *your* document instead. Both
+default to off, and neither changes anything about the chat.
+
+### Mount points
+
+Add either or both wherever the content belongs in your layout:
+
+```html
+<div data-divinci-faq></div>
+<div data-divinci-attribution></div>
+```
+
+The badge falls back to the end of `<body>` if you declare no mount point. The
+FAQ block renders **nothing at all** without one — we do not inject a content
+block into a page at a position its author did not choose.
+
+### `seo-badge`
+
+Renders the attribution link into your document with
+`rel="nofollow sponsored noopener noreferrer"`.
+
+The `nofollow sponsored` qualification is deliberate and is not going to change.
+A followed link repeated across every free-tier install is the pattern Google
+documents as a link scheme, and the risk of that lands on your domain as much as
+on ours. What the badge is actually worth is referral traffic, which `nofollow`
+does not diminish.
+
+It is suppressed automatically on plans that allow branding removal — resolved
+server-side from your release, not from anything the page can set.
+
+### `seo-faq`
+
+Renders question-and-answer content into your page as visible markup, plus a
+matching `FAQPage` JSON-LD block.
+
+The content is generated ahead of time from your release's own conversation
+starters, answered through your own RAG corpus, and cached — it is not generated
+on page load. Ask your Divinci contact to publish it for a release; until it is
+published the endpoint returns 404 and the block simply does not render.
+
+Three properties this surface guarantees, because getting any of them wrong
+would damage your site rather than help it:
+
+1. **Explicit mount only.** No content is ever injected at a position you did
+   not choose.
+2. **Visible or absent.** The block is rendered as an always-open description
+   list with no collapsing and no hiding. Text present for crawlers but not for
+   users is cloaking, and we will not put that on your page.
+3. **The structured data matches what rendered.** The `FAQPage` graph is built
+   from the same list that produced the visible markup, after it rendered.
+   Structured data describing content a reader cannot see is a manual-action
+   risk for your domain.
+
+Answers are flattened to plain prose and HTML-escaped before publication, so
+nothing in them can inject markup into your page.
+
+```html
+<script src="https://embed.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+  seo-badge
+  seo-faq
+></script>
+```
+
+## `window.DIVINCI_AI` global
+
+When the script loads, it exposes one global keyed by `data-global-name` (default `DIVINCI_AI`):
+
+```typescript
+type DivinciAIGlobal = {
+  version: string;                                  // package version of the embed
+  DivinciChat: typeof DivinciChat;                   // class for manual mounts
+  createChat: (opts: CreateDivinciChatOptions) => DivinciChat;
+  DEFAULT_CHAT: DivinciChat | null;                  // populated after window.load if auto-mount succeeds
+};
+```
+
+`DEFAULT_CHAT` is `null` until the `load` event has fired (or stays `null` if `divinci-release-id` was missing).
+
+## `createChat(options)` — manual mount
+
+Use this when you want a chat that isn't auto-mounted, or you want a second chat instance on the page.
+
+```typescript
+const chat = window.DIVINCI_AI.createChat({
+  releaseId: "rel_your-release-id",
+  toggleable: false,
+  contextBubbles: true,
+});
+document.body.appendChild(chat.iframe);
+await chat.waitForReady();
+```
+
+### `CreateDivinciChatOptions`
+
+| Option | Type | Default | When to use |
+|--------|------|---------|-------------|
+| `releaseId` | `string` | — (required) | Identifies which release configuration drives the chat (model, system prompt, RAG, theme). |
+| `cssSrc` | `string` (URL) | `undefined` | Publicly-reachable stylesheet for white-label theming inside the iframe. Must be a valid URL or the constructor throws. |
+| `debug` | `boolean` | `false` | Verbose logging across the script and iframe bridge. |
+| `externalUser` | `boolean` | `false` | Enables the `auth` sub-API. When `false`, `chat.auth` is `null`. |
+| `productRecommendations` | `boolean` | `false` | Renders inline product cards in assistant responses. |
+| `toggleable` | `boolean` | `false` | When `true`, renders a floating launcher / overlay. When `false`, you mount `chat.iframe` wherever you want and `chat.ui` is `null`. |
+| `metrics` | `boolean` | `false` | Enables metrics surfacing inside the embed. |
+| `helpRequests` | `boolean` | `false` | Enables help-request CTAs. |
+| `notifications` | `boolean` | `false` | Enables notifications inside the embed. |
+| `contextBubbles` | `boolean` | `false` | Renders RAG context bubbles. |
+| `messageFeedback` | `boolean` | `false` | Shows thumbs-up/down + feedback dropdown on assistant replies. |
+| `quickMenu` | `boolean` | `false` | Enables the in-chat quick menu. |
+| `shareChat` | `boolean` | `false` | Enables share-this-chat affordance. |
+| `hideLogin` | `boolean` | `false` | Hides the Login button in the hamburger menu. Paid-plan only — see [Menu-item removal](#menu-item-removal-paid-plans). |
+| `hideAiInfo` | `boolean` | `false` | Hides the "AI Info" link in the hamburger menu. Paid-plan only — see [Menu-item removal](#menu-item-removal-paid-plans). |
+| `readAloud` | `boolean` | `false` | Browser-native "read aloud" button on assistant messages (`speechSynthesis`; no server TTS). |
+| `seoBadge` | `boolean` | `false` | Attribution link in the **host page's** DOM. See [Host-page SEO surface](#host-page-seo-surface). |
+| `seoFaq` | `boolean` | `false` | Crawlable Q&A + `FAQPage` structured data in the **host page's** DOM. See [Host-page SEO surface](#host-page-seo-surface). |
+| `hideDivinci` | `boolean` | `false` | Hides the "Divinci" branding link in the hamburger menu. Paid-plan only — see [Menu-item removal](#menu-item-removal-paid-plans). |
+| `experimentId` | `string` | `undefined` | Experiment identifier for A/B reporting. |
+| `experimentVariant` | `"control" \| "treatment"` | `undefined` | Assigned variant. |
+
+Note on auto-mount defaults: when the script auto-mounts using script-tag attributes, it forces `toggleable: true`. Manual `createChat` calls default `toggleable` to `false`.
+
+## `DivinciChat` instance
+
+```typescript
+class DivinciChat {
+  readonly chat: BasicChat;                   // underlying chat controller
+  readonly iframe: HTMLIFrameElement;         // mount this where you want chat to appear
+  readonly auth: ExternalLogin | null;        // present when externalUser: true
+  readonly ui:   ToggleableChat | null;       // present when toggleable: true
+
+  waitForReady(): Promise<void>;
+  openSharedChat(shareToken: string): void;   // jumps the iframe to a shared-conversation deep link
+  destroy(): void;                            // tear down the chat, auth, and ui
+}
+```
+
+### Lifecycle
+
+1. **Construct.** `new DivinciChat({...})` or `createChat({...})` synchronously creates `chat.iframe`. The iframe is *not* yet attached to the DOM.
+2. **Mount.** Append `chat.iframe` to a container, or — for the auto-mounted `toggleable: true` case — the script handles the mount.
+3. **Wait for ready.** `await chat.waitForReady()` resolves once the in-iframe app has booted and the message bridge is connected.
+4. **(Optional) log in.** If `externalUser: true`, call `chat.auth.login(jwt, opts?)` once you have a user JWT.
+5. **(Optional) shared chat.** `chat.openSharedChat(token)` redirects the iframe to a 64-hex shared-conversation URL.
+6. **Destroy.** `chat.destroy()` tears down the iframe, message bridge, auth, and UI affordances. Call this on SPA route changes when the chat should go away.
+
+### Errors thrown by the constructor
+
+- `releaseId is required` — empty `releaseId`.
+- `Invalid cssSrc` — `cssSrc` is not a parseable URL.
+
+## `chat.auth` — `ExternalLogin`
+
+Present only when `externalUser: true`. Manage your end-user identity in the embed.
+
+```typescript
+interface ExternalLogin {
+  readonly user: User | null;
+  readonly isLoggedIn: boolean;
+  readonly tierConfig: TierConfig | null;
+  readonly onUserChange: EventListener<[User | null]>;
+
+  login(jwt: string, options?: LoginOptions): Promise<LoginResult>;
+  logout(): Promise<void>;
+  getCurrentUser(): User | null;
+}
+
+type LoginOptions = {
+  tier?: "free" | "basic" | "premium" | "enterprise" | "unlimited";
+  pricingTier?: "non_member" | "gold_member" | "platinum_member" | "diamond_member";
+  metadata?: Record<string, unknown>;
+};
+
+type LoginResult = {
+  user: { id: string };
+  tierConfig: TierConfig;  // tier, limits, usage, remaining, pricingTier
+};
+```
+
+The `tier` you pass in `LoginOptions` is a *request* — the server validates and may return a different tier in `tierConfig`. `pricingTier` is a BigCommerce-only hint for which price band to display.
+
+**Example: log in once the host page knows the user:**
+
+```javascript
+const chat = window.DIVINCI_AI.DEFAULT_CHAT;
+await chat.waitForReady();
+
+const result = await chat.auth.login(myJwt, { tier: "premium" });
+console.log("logged in as", result.user.id, "tier:", result.tierConfig.tier);
+
+// Subscribe — calling the event returns an unsubscribe function
+const unsubscribe = chat.auth.onUserChange((user) => {
+  console.log("user changed:", user);
+});
+// later: unsubscribe();
+```
+
+## `chat.ui` — `ToggleableChat`
+
+Present only when `toggleable: true`. Controls the floating launcher / overlay.
+
+```typescript
+interface ToggleableChat {
+  readonly isOpen: boolean;
+  toggleChat(): void;
+  openChat(): void;
+  closeChat(): void;
+  onToggle: EventListener<[boolean]>;
+}
+```
+
+**Example: programmatically open chat from a "Need help?" button on your page:**
+
+```javascript
+document.querySelector("#help-button").addEventListener("click", () => {
+  window.DIVINCI_AI.DEFAULT_CHAT?.ui?.openChat();
+});
+
+window.DIVINCI_AI.DEFAULT_CHAT?.ui?.onToggle((isOpen) => {
+  console.log("chat is now", isOpen ? "open" : "closed");
+});
+```
+
+## `chat.chat` — `BasicChat`
+
+The underlying chat controller, primarily exposed for state observation.
+
+```typescript
+interface BasicChat {
+  readonly state: "not-ready" | "getting-ready" | "error" | "ready" | "destroyed";
+  readonly onStateChange: EventListener<["not-ready" | "getting-ready" | "error" | "ready" | "destroyed"]>;
+  waitForReady(): Promise<void>;
+}
+```
+
+`chat.waitForReady()` on the top-level `DivinciChat` delegates to this.
+
+## Shared-chat deep links
+
+`chat.openSharedChat(token)` navigates the iframe to a read-only shared-conversation URL. The token is validated client-side as a 64-character lowercase hex string; an invalid token throws `Invalid share token — must be a 64-character hex string`. The shared chat becomes a fork the moment the user sends a message.
+
+```javascript
+const chat = window.DIVINCI_AI.createChat({ releaseId: "rel_..." });
+document.body.appendChild(chat.iframe);
+await chat.waitForReady();
+chat.openSharedChat("abc123...token...");  // 64 hex chars
+```
+
+## CSS customization
+
+Theming happens inside the iframe — your host-page CSS cannot reach it. Two surface areas:
+
+- **`cssSrc` attribute / option:** points to a stylesheet hosted at a publicly-reachable URL. The embed loads it inside the iframe and applies its rules. Use this for white-label color, typography, spacing, and component overrides.
+- **CSS variables exposed by the embed app:** the embed exposes themeable CSS variables that `cssSrc` stylesheets can override. The current set is documented in your release's white-label configuration in the Divinci dashboard.
+
+The launcher button (when `toggleable: true`) and floating overlay are styled by the embed app itself; theme them via `cssSrc`.
+
+## Event hooks summary
+
+| Hook | When it fires |
+|------|---------------|
+| `chat.chat.onStateChange` | Every transition between `not-ready / getting-ready / ready / error / destroyed`. |
+| `chat.auth.onUserChange` | After successful login, logout, or external token refresh. |
+| `chat.ui.onToggle` | Every time the toggleable overlay opens or closes. |
+
+Each hook is an `EventListener<[Args]>` from `@divinci-ai/embed-shared`. It is a
+**callable**: invoking it with a handler subscribes and returns an unsubscribe
+function. Equivalent `.on(handler)` / `.off(handler)` methods are also available.
+
+```javascript
+// Subscribe (callable form) — returns an unsubscribe function
+const unsubscribe = chat.ui.onToggle((isOpen) => { /* ... */ });
+unsubscribe();
+
+// Or use the explicit methods
+const handler = (isOpen) => { /* ... */ };
+chat.ui.onToggle.on(handler);
+chat.ui.onToggle.off(handler);
+```

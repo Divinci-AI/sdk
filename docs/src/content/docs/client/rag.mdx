@@ -1,0 +1,96 @@
+---
+title: RAG & Vectors
+description: Inspect and manage a Release's vector indexes from the browser.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The `client.rag` namespace lets a client inspect and manage the **vector indexes**
+(RAG knowledge bases) attached to a workspace. Retrieval itself happens
+automatically during chat — when the Release has context bubbles enabled, RAG
+sources arrive on each message's `context` field (see [Chat](/client/chat)).
+
+<Aside type="note">
+  Heavy ingestion — uploading documents, chunking, embedding — belongs on the
+  server with <a href="/server/rag">`@divinci-ai/server`</a>. The client RAG
+  namespace is for listing, creating, and managing the index records themselves.
+</Aside>
+
+## Scoping to a workspace
+
+Most calls accept a `workspaceId` in their params. If your client has a default
+workspace (constructor `workspaceId`), you can omit it. Otherwise scope explicitly:
+
+```typescript
+const rag = client.rag.withWorkspace("ws_123");
+```
+
+## Vector indexes
+
+Vector-index operations live under `client.rag.vectorIndex`.
+
+```typescript
+const vi = client.rag.vectorIndex;
+
+// List the workspace's vector indexes
+const indexes = await vi.list({ workspaceId: "ws_123" });
+
+// Create a new index
+const index = await vi.create(
+  { workspaceId: "ws_123" },
+  {
+    title: "Product docs",
+    description: "Product documentation knowledge base",
+    vectorIndexTool: "vectorize", // the managed default backend
+  },
+);
+
+// Fetch one
+const one = await vi.get({ workspaceId: "ws_123", ragId: index._id });
+
+// Update its settings
+await vi.update(
+  { workspaceId: "ws_123", ragId: index._id },
+  { title: "Product docs (v2)", description: "Product documentation knowledge base" },
+);
+```
+
+### Forking an index
+
+Fork copies an existing index — useful for branching a knowledge base without
+re-ingesting source documents:
+
+```typescript
+const forked = await vi.fork(
+  { workspaceId: "ws_123", ragId: index._id },
+  { title: "Product docs — staging copy" },
+);
+```
+
+### Deleting an index
+
+```typescript
+await vi.delete({ workspaceId: "ws_123", ragId: index._id });
+```
+
+## Reading RAG context from chat
+
+When a Release uses a vector index, retrieved chunks come back with each assistant
+message. Render them as citations:
+
+```typescript
+await client.chat.stream(thread.id, "What's the warranty period?", {
+  assistantName: "your-assistant-id",
+  onEvent: (event) => {
+    if (event.type === "context") {
+      for (const source of event.context) {
+        console.log(source.metadata.originalName, source.score);
+      }
+    }
+  },
+});
+```
+
+Each context entry includes the `vectorId`, the matched `content` chunk, source
+file `metadata` (original name, token count, and product fields when applicable),
+and a similarity `score`.

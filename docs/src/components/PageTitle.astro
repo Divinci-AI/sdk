@@ -1,0 +1,229 @@
+---
+/**
+ * PageTitle override: renders the default page title plus a "Copy page ▾"
+ * dropdown in the upper right of every docs page.
+ *
+ * The dropdown offers the page as clean Markdown (emitted by
+ * scripts/emit-raw-md.mjs as /<slug>.md) AND one-line paths to connect an AI
+ * assistant to Divinci directly — via MCP or the CLI — which beats pasting
+ * page source into a chat.
+ */
+const slug = Astro.locals.starlightRoute.id || "index";
+const mdPath = `/${slug}.md`;
+
+const MCP_SNIPPET = JSON.stringify(
+  { mcpServers: { divinci: { url: "https://mcp.divinci.app/mcp" } } },
+  null,
+  2,
+);
+const CLI_SNIPPET = "npm install -g @divinci-ai/cli && divinci auth login";
+---
+
+<div class="page-title-row">
+  <h1 id="_top">{Astro.locals.starlightRoute.entry.data.title}</h1>
+
+  <details class="copy-page" id="copy-page-menu">
+    <summary aria-label="Copy page or connect your AI assistant">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy page
+      <svg class="caret" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg>
+    </summary>
+
+    <div class="menu" role="menu">
+      <button type="button" class="item" data-copy-md={mdPath} role="menuitem">
+        <strong>Copy page as Markdown</strong>
+        <span>Paste clean source into any chat</span>
+      </button>
+      <a class="item" href={mdPath} role="menuitem">
+        <strong>View as Markdown</strong>
+        <span>Raw page at <code>{mdPath}</code></span>
+      </a>
+
+      <div class="hint" role="presentation">
+        Better than pasting: connect your assistant to Divinci directly —
+      </div>
+
+      <button type="button" class="item" data-copy-text={MCP_SNIPPET} role="menuitem">
+        <strong>Copy MCP config</strong>
+        <span>Live Divinci tools in Claude, Cursor, &amp; co. · <a href="/mcp/overview">docs</a></span>
+      </button>
+      <button type="button" class="item" data-copy-text={CLI_SNIPPET} role="menuitem">
+        <strong>Copy CLI install</strong>
+        <span><code>{CLI_SNIPPET}</code> · <a href="/cli/overview">docs</a></span>
+      </button>
+    </div>
+  </details>
+</div>
+
+<style>
+  .page-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem 1rem;
+  }
+  .page-title-row h1 {
+    margin-top: 0;
+    flex: 1 1 auto;
+    min-width: 12rem;
+    /* match Starlight's default PageTitle */
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-h1);
+    font-weight: 600;
+    line-height: var(--sl-line-height-headings);
+  }
+
+  .copy-page {
+    position: relative;
+    flex: 0 0 auto;
+    margin-top: 0.4rem;
+    font-size: var(--sl-text-xs);
+  }
+  .copy-page summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+    padding: 0.35rem 0.65rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    color: var(--sl-color-gray-2);
+    background: var(--sl-color-black);
+    white-space: nowrap;
+  }
+  .copy-page summary::-webkit-details-marker {
+    display: none;
+  }
+  .copy-page summary:hover {
+    border-color: var(--sl-color-gray-4);
+    color: var(--sl-color-white);
+  }
+  .copy-page[open] .caret {
+    transform: rotate(180deg);
+  }
+
+  /*
+   * The site's glass styling puts `backdrop-filter` on `.content-panel`, and a
+   * non-`none` backdrop-filter ESTABLISHES A STACKING CONTEXT. That traps this
+   * menu's z-index inside the title panel, so the markdown panel — a later
+   * sibling at the same level — painted straight over the open dropdown. No
+   * z-index on `.menu` can escape that; the panel itself has to be lifted.
+   * Scoped with `:has()` so it only applies while the menu is open, leaving the
+   * normal stacking (and the glass effect) untouched.
+   */
+  :global(.content-panel:has(.copy-page[open])) {
+    position: relative;
+    z-index: 20;
+  }
+
+  .menu {
+    position: absolute;
+    right: 0;
+    z-index: 10;
+    margin-top: 0.35rem;
+    width: min(21rem, 85vw);
+    display: flex;
+    flex-direction: column;
+    padding: 0.3rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.6rem;
+    background: var(--sl-color-black);
+    box-shadow: var(--sl-shadow-md);
+  }
+  .item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.05rem;
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: none;
+    cursor: pointer;
+    color: var(--sl-color-gray-2);
+    text-decoration: none;
+    font: inherit;
+  }
+  .item:hover {
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+  }
+  .item strong {
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+  .item span {
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+  }
+  .item span a {
+    color: var(--sl-color-accent-high);
+  }
+  .item code {
+    font-size: 0.68rem;
+  }
+  .hint {
+    padding: 0.5rem 0.6rem 0.15rem;
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+    border-top: 1px solid var(--sl-color-gray-5);
+    margin-top: 0.3rem;
+  }
+</style>
+
+<script>
+  function setup() {
+    const menu = document.getElementById("copy-page-menu") as HTMLDetailsElement | null;
+    if (!menu) return;
+
+    // Close when clicking outside.
+    document.addEventListener("click", (event) => {
+      if (menu.open && !menu.contains(event.target as Node)) menu.open = false;
+    });
+
+    async function copy(text: string, button: HTMLElement) {
+      try {
+        await navigator.clipboard.writeText(text);
+        flash(button, "Copied ✓");
+      } catch {
+        flash(button, "Copy failed");
+      }
+    }
+
+    function flash(button: HTMLElement, label: string) {
+      const strong = button.querySelector("strong");
+      if (!strong) return;
+      const original = strong.textContent;
+      strong.textContent = label;
+      setTimeout(() => {
+        strong.textContent = original;
+        menu!.open = false;
+      }, 1200);
+    }
+
+    menu.querySelectorAll<HTMLElement>("[data-copy-text]").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        // Let nested doc links navigate normally.
+        if ((event.target as HTMLElement).closest("a")) return;
+        copy(button.dataset.copyText ?? "", button);
+      });
+    });
+
+    menu.querySelectorAll<HTMLElement>("[data-copy-md]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          const response = await fetch(button.dataset.copyMd ?? "");
+          if (!response.ok) throw new Error(String(response.status));
+          await copy(await response.text(), button);
+        } catch {
+          flash(button, "Copy failed");
+        }
+      });
+    });
+  }
+
+  setup();
+</script>

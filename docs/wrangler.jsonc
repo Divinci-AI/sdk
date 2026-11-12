@@ -1,0 +1,56 @@
+{
+  // Static-asset Worker for sdk.divinci.ai (Astro + Starlight build output).
+  //
+  // Build  : `pnpm build` from this directory (writes ./dist)
+  // Deploy : `env -u CLOUDFLARE_API_TOKEN wrangler deploy --env=""` (prod)
+  //          `env -u CLOUDFLARE_API_TOKEN wrangler deploy --env staging`
+  //
+  // The CLOUDFLARE_API_TOKEN env var must be unset because the cached OAuth
+  // token takes precedence in interactive sessions; leaving it set causes
+  // "Invalid access token" failures (same pattern as the main divinci.ai site).
+  "name": "divinci-sdk-docs",
+  "compatibility_date": "2026-05-26",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "./dist/",
+    "not_found_handling": "404-page"
+  },
+
+  // OFF for production. sdk.divinci.ai reaches this Worker through a custom
+  // domain configured in the dashboard (which is why "routes" below stays
+  // commented), so the workers.dev hostname added nothing but a SECOND
+  // indexable origin serving the identical build -- and this build's robots.txt
+  // says Allow, because it is the production build. Same duplicate-content
+  // mistake the marketing site already fixed with workers_dev: false.
+  //
+  // Staging keeps it: that hostname is staging's ONLY way in, and its robots.txt
+  // is emitted with `Disallow: /` for exactly that reason.
+  "workers_dev": false,
+  "preview_urls": true,
+
+  "placement": {
+    "mode": "smart"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Production routes (commented until DNS cutover is performed in the
+  // Cloudflare dashboard — adding a route here without DNS will return
+  // "no zone found" errors during deploy).
+  // "routes": [
+  //   { "pattern": "sdk.divinci.ai/*", "zone_name": "divinci.ai" }
+  // ],
+
+  "env": {
+    "staging": {
+      "name": "divinci-sdk-docs-staging",
+      "workers_dev": true
+      // "routes": [
+      //   { "pattern": "sdk-staging.divinci.ai/*", "zone_name": "divinci.ai" }
+      // ]
+    }
+  }
+}

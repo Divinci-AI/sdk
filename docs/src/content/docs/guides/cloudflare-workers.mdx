@@ -1,0 +1,246 @@
+---
+title: Deploy to Cloudflare Workers
+description: Build a gated, anonymous landing-page chat on Cloudflare Workers — static frontend + a Worker that signs calls to the Divinci API with a landing-page HMAC.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+A common pattern is a **public marketing page with an embedded AI chat** —
+no login, one free message per visitor, talking to a Divinci
+[Release](/server/releases). The catch: the page is anonymous, but you still
+need to authenticate to the API and keep your credentials off the client.
+
+The clean way to do this on Cloudflare is a **static frontend + a small Worker
+proxy**. The browser never holds a credential; the Worker holds the secret,
+enforces quota, and signs each upstream call.
+
+<Aside type="tip">
+**Working example:** [`Divinci-AI/drfuhrman-ai-landing`](https://github.com/Divinci-AI/drfuhrman-ai-landing)
+is a complete, production landing page built exactly this way — Astro static
+site + a Cloudflare Worker (`src/worker.ts`) that proxies to the Divinci API
+with the landing-page HMAC, plus per-email quota in a Durable Object. Most of
+this guide mirrors that repo.
+</Aside>
+
+## Architecture
+
+```
+Browser (React island)
+   │  POST /api/chat-send   { email, newPrompt, transcript, ... }
+   ▼
+Cloudflare Worker  (src/worker.ts)
+   │  • Basic-Auth gate (preview only)
+   │  • per-email quota (KV + Durable Object)
+   │  • HMAC-signs the call
+   │  POST {DIVINCI_API_BASE}/ai-chat/anonymous-chat
+   │      X-Landing-Page-Ts, X-Landing-Page-Sig
+   ▼
+Divinci API  →  verifies the signature, runs RAG + the Release's model chain
+```
+
+The Worker runs **first** for every request (`run_worker_first = true`) and
+serves static assets via the `ASSETS` binding for everything that isn't `/api/*`.
+
+<Aside type="tip">
+The Worker → API call is **server-to-server**, so send it with **no `Origin`
+header** — CORS is a browser mechanism and doesn't apply. The API allows
+no-origin requests and gates this endpoint on the HMAC signature, so **no
+per-domain CORS allowlisting is ever needed** — local dev and every customer
+domain work out of the box. (Forwarding the Worker's own `Origin` would force
+each new domain onto a server-side allowlist, which doesn't scale.)
+</Aside>
+
+## Authentication: the landing-page HMAC (not an API key)
+
+<Aside type="caution">
+A landing page does **not** use a Divinci API key or a user token. Anonymous,
+gated chat is authenticated with a **shared HMAC secret** — the
+`LANDING_PAGE_HMAC_KEY`. Putting an API key here is a common mistake (it will be
+rejected). See [Authentication](/getting-started/authentication) for where API
+keys and user tokens *do* belong.
+</Aside>
+
+When a Release has **`requireSignedAnonymousChat`** enabled, the API only
+accepts anonymous-chat calls that carry a valid signature. The Worker stamps two
+headers on each upstream request:
+
+```
+X-Landing-Page-Ts:  <unix-epoch-seconds>
+X-Landing-Page-Sig: HMAC-SHA256(LANDING_PAGE_HMAC_KEY, `${ts}.${releaseId}.${newPrompt}`)
+```
+
+The API recomputes the HMAC with the same shared secret and rejects the request
+(`403 landing_page_sig_invalid`) when the signature doesn't match, the headers
+are missing, or `abs(now - ts) > 300` (a 5-minute replay window). Including
+`newPrompt` in the signed payload means a snooped `(ts, sig)` pair can't be
+reused to send a different prompt.
+
+```ts
+// Worker side — sign the upstream call
+async function signHeaders(key: string, releaseId: string, newPrompt: string) {
+  const ts = Math.floor(Date.now() / 1000);
+  const mac = await crypto.subtle.importKey(
+    "raw", new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" }, false, ["sign"],
+  );
+  const sigBuf = await crypto.subtle.sign(
+    "HMAC", mac, new TextEncoder().encode(`${ts}.${releaseId}.${newPrompt}`),
+  );
+  const sig = [...new Uint8Array(sigBuf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return { "X-Landing-Page-Ts": String(ts), "X-Landing-Page-Sig": sig };
+}
+```
+
+The same secret is set on **both** sides — the Worker (`wrangler secret put
+LANDING_PAGE_HMAC_KEY`) and the Divinci API for that environment. They must be
+byte-for-byte identical or every call 403s.
+
+<Aside type="note">
+**The key is shared; the release id is data.** `LANDING_PAGE_HMAC_KEY` is one
+shared secret per API environment — the *same* value for every Release. It is
+**not** a Release's API key and isn't derived from one (an API key in this slot
+is the wrong kind of credential and always 403s). The `releaseId` lives in the
+signed *message* (`ts.releaseId.newPrompt`), which binds each signature to a
+specific release — but it's data, not the key. The API also accepts a
+comma-separated list (`"<new>,<old>"`), so the shared key can be rotated with a
+24-hour overlap instead of a flag-day cutover.
+</Aside>
+
+## Release configuration
+
+The chat runs against a Divinci [Release](/server/releases/#anonymous-chat), and
+three Release fields gate anonymous access. They layer — "is the door open?"
+then "do you need the key?":
+
+| Field | Set to | Effect |
+| --- | --- | --- |
+| `allowAnonymousChat` | `true` | Master switch. While `false`, the API returns `403 FORBIDDEN` — no anonymous chat at all. |
+| `requireSignedAnonymousChat` | `true` | Require the HMAC signature, so only your Worker can call the endpoint. |
+| `maxAnonymousChatMessages` | e.g. `12` | Per-conversation message cap (default `1` — raise for multi-turn). |
+
+<Aside type="caution">
+**Set `requireSignedAnonymousChat: true` for any public page.** The per-email
+free-message quota lives in the *Worker* (KV + Durable Object), not the API — so
+with signing off, anyone with the release id can `curl` the endpoint directly,
+bypass the quota, and burn the release owner's wallet. The signature is what
+forces every caller through your Worker.
+</Aside>
+
+## Configuration
+
+Non-secret config goes in `wrangler.toml` `[vars]`; secrets go in Wrangler
+secrets (never the repo):
+
+```toml
+# wrangler.toml
+name = "my-landing"
+main = "./src/worker.ts"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[vars]
+DIVINCI_API_BASE   = "https://api.divinci.app"
+DIVINCI_RELEASE_ID = "<your release id>"
+```
+
+```bash
+# Secrets — per environment, not committed
+wrangler secret put LANDING_PAGE_HMAC_KEY            # must match the API's value
+wrangler secret put BASIC_AUTH_PASSWORD --env staging  # optional preview gate
+```
+
+<Aside type="note">
+`DIVINCI_RELEASE_ID` and the API URL are **not** secrets — they're safe in a
+public repo. With `requireSignedAnonymousChat` on, they're useless without the
+HMAC secret, which never leaves Wrangler secrets.
+</Aside>
+
+## Local development
+
+The Worker owns every `/api/*` route, so you must run the **Worker**, not just a
+static dev server. A plain static/SPA dev server (e.g. `astro dev`, `vite`)
+serves your pages but **never runs `src/worker.ts`** — so `/api/*` returns
+**404**. Use `wrangler dev`.
+
+<Steps>
+
+1. **Local secrets — `.dev.vars`** (gitignored). `wrangler dev` reads it for the
+   Worker's secrets:
+
+   ```bash
+   # .dev.vars — do NOT commit
+   LANDING_PAGE_HMAC_KEY=<same value as the target env's API + worker secret>
+   ```
+
+2. **Run the Worker:**
+
+   ```bash
+   wrangler dev          # → http://localhost:8787, runs the real Worker + /api
+   ```
+
+   For frontend hot-reload too, run your static dev server alongside and proxy
+   `/api` to the Worker (e.g. a vite `server.proxy` of `/api → localhost:8787`).
+   Pin the Worker's port (`[dev] port = 8787` in `wrangler.toml`) so the proxy
+   target doesn't drift.
+
+</Steps>
+
+### Common gotchas
+
+| Symptom | Cause / fix |
+| --- | --- |
+| `404` on `/api/*` | Static dev server is running but the Worker isn't. Run `wrangler dev`. |
+| `502` + `Origin ... not allowed by CORS` | The Worker is forwarding an `Origin` header. Don't — it's a server-to-server call; omit `Origin` entirely and the API allows it (HMAC is the gate). No allowlisting needed. |
+| `403 landing_page_sig_invalid` | The `LANDING_PAGE_HMAC_KEY` in `.dev.vars` doesn't match the API's. Use the exact env value — and make sure it's the HMAC key, not an API key. |
+| `402 quota_exhausted` | The visitor used their free message. It's local Durable-Object/KV state under `wrangler dev` — clear it with `rm -rf .wrangler/state`, or wire an admin reset endpoint. |
+
+## Conversation persistence (optional)
+
+Anonymous chat is stateless by default — the signed transcript lives in the
+visitor's browser. To get **usage analytics and feedback-conversation links**,
+send a stable per-visitor `sessionId` with each `anonymous-chat` (and
+feedback) call; the API then persists the conversation as a customer chat,
+visible in the workspace's **Customer Chats** view.
+
+```ts
+// Browser: mint once, keep in localStorage
+const sessionId = crypto.randomUUID();
+
+// Worker: include it in the upstream body alongside the signed fields
+body: JSON.stringify({ releaseId, prevSigniture, newPrompt, transcript, sessionId })
+```
+
+Rules worth knowing:
+
+- **Format:** 8–128 chars of `[A-Za-z0-9_-]`. Anything else is rejected
+  server-side and the conversation simply isn't persisted (chat still works).
+- **Scope:** one persisted chat per `(sessionId, release)`.
+- **Append-only:** the server reconciles by exchange timestamps and never
+  shrinks a stored transcript — a page reload that restarts the client's
+  transcript chain appends rather than overwrites.
+- **Privacy:** persist the conversation, not the identity — the gate email is
+  not stored on the chat.
+
+## Deploy
+
+```bash
+# build the static assets, then deploy the Worker + assets atomically
+npm run build
+wrangler deploy --env staging
+wrangler deploy            # production
+```
+
+Static assets and the Worker deploy together — there's no separate asset upload
+step and no partial-deploy window.
+
+## Related
+
+- [Authentication](/getting-started/authentication) — API keys, user tokens, and
+  SDK-level anonymous chat (when you *do* want a credential, not an HMAC).
+- [Releases](/server/releases) — configuring the Release your landing page chats
+  against, including anonymous-chat and signed-request settings.
+- [`Divinci-AI/drfuhrman-ai-landing`](https://github.com/Divinci-AI/drfuhrman-ai-landing) — the full reference implementation.

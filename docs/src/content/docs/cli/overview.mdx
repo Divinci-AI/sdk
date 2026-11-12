@@ -1,0 +1,1021 @@
+---
+title: Divinci CLI
+description: Official command-line interface for Divinci AI — manage workspaces, chat with AI assistants, search knowledge bases, and control releases from your terminal.
+sidebar:
+  label: Overview
+---
+
+import { Aside, Steps, Tabs, TabItem, Card, CardGrid } from "@astrojs/starlight/components";
+
+The official CLI for Divinci AI. Authenticate once, then manage your entire workspace — chat sessions, knowledge bases, releases, and more — directly from your terminal or CI pipeline.
+
+<CardGrid>
+  <Card title="Chat" icon="comment">
+    Interactive REPL, one-shot messages, streaming responses, and full conversation history.
+  </Card>
+  <Card title="Knowledge Base" icon="document">
+    Search your RAG index, list indexed files, and check processing status.
+  </Card>
+  <Card title="Workspaces" icon="node">
+    List, inspect, and switch between workspaces. Set a per-project default.
+  </Card>
+  <Card title="Releases" icon="rocket">
+    View and manage your AI releases. Filter by status, inspect configuration.
+  </Card>
+  <Card title="Hermes Agents" icon="seti:pipeline">
+    Create and chat with hosted NousResearch Hermes agents — isolated containers, platform or BYOK models, RAG-grounded via a Release.
+  </Card>
+  <Card title="Raw API Access" icon="right-arrow">
+    Make authenticated API requests without writing code — great for exploration and one-offs.
+  </Card>
+  <Card title="Scripting & CI/CD" icon="laptop">
+    Every command supports `--json` output. Pipe to `jq`, use in shell scripts, automate in pipelines.
+  </Card>
+</CardGrid>
+
+## Installation
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install -g @divinci-ai/cli
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add -g @divinci-ai/cli
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn global add @divinci-ai/cli
+    ```
+  </TabItem>
+  <TabItem label="npx (no install)">
+    ```bash
+    npx @divinci-ai/cli <command>
+    ```
+  </TabItem>
+</Tabs>
+
+<Aside type="note">
+  **Requires Node.js >= 22.14.0.** Run `node --version` to confirm. We recommend using [nvm](https://github.com/nvm-sh/nvm) or [fnm](https://github.com/Schniz/fnm) to manage Node versions.
+</Aside>
+
+## Quick Start
+
+<Steps>
+
+1. **Authenticate**
+
+   ```bash
+   divinci auth login
+   ```
+
+   By default this opens your browser for OAuth login. To authenticate with a
+   workspace API key instead (headless machines, CI), pass `--use-api-key` and
+   you'll be prompted to paste the key — or supply it directly with the
+   root-level `--api-key <key>` override, which implies API-key login.
+   Credentials are validated and stored securely in
+   `~/.config/divinci/credentials.json`.
+
+   <Aside type="tip">
+     Get your API key from the [Divinci dashboard](https://app.divinci.ai/settings/api-keys). Keys look like `dv_key_...`.
+   </Aside>
+
+2. **Select a workspace**
+
+   ```bash
+   divinci workspace list
+   divinci workspace use ws_abc123
+   ```
+
+   Setting a default workspace means you won't need to pass `--workspace` to every subsequent command.
+
+3. **Start chatting**
+
+   ```bash
+   divinci chat
+   ```
+
+   This opens an interactive REPL session. Use `/help` to list session commands, `/new` to start a fresh conversation, and `/exit` to quit.
+
+4. **Send a one-shot message**
+
+   ```bash
+   divinci chat send <transcriptId> "What is the return policy?" --stream
+   ```
+
+   Use `--stream` to print tokens as they arrive instead of waiting for the full response.
+
+</Steps>
+
+## Authentication
+
+The CLI stores credentials in `~/.config/divinci/credentials.json` with `0600` permissions (readable only by your user account). Named profiles let you work across multiple environments.
+
+```bash
+# Interactive login — opens the browser for OAuth
+divinci auth login
+
+# Authenticate with a workspace API key instead (headless, CI)
+divinci auth login --use-api-key
+
+# Login to a named profile (stored alongside the default)
+divinci auth login --profile staging
+
+# Check who you're authenticated as
+divinci auth status
+divinci auth whoami         # alias for status
+
+# Remove stored credentials
+divinci auth logout
+divinci auth logout -y      # skip confirmation prompt
+```
+
+<Aside type="caution">
+  Never hardcode your API key in scripts or commit it to version control. For CI/CD, use the `DIVINCI_API_KEY` environment variable instead of `divinci auth login`.
+</Aside>
+
+## Configuration
+
+Configuration sources are resolved in this priority order — higher always wins:
+
+| Priority | Source | How to set |
+|----------|--------|------------|
+| **1** (highest) | CLI flags | `--api-key`, `--workspace`, `--profile` |
+| **2** | Environment variables | `DIVINCI_API_KEY`, `DIVINCI_WORKSPACE_ID` |
+| **3** | Project config file | `.divinci/config.json` in the current directory |
+| **4** (lowest) | User credentials | `~/.config/divinci/credentials.json` |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `DIVINCI_API_KEY` | API key — required when not using `auth login` |
+| `DIVINCI_WORKSPACE_ID` | Default workspace for all commands |
+| `DIVINCI_API_URL` | Override API base URL (default: `https://api.divinci.app`) |
+| `DIVINCI_PROFILE` | Named profile to load (default: `default`) |
+| `DIVINCI_EXTRA_HEADERS` | JSON object of extra headers sent on every request — e.g. Cloudflare Access service-token headers for a gated environment |
+
+### Project Config File
+
+Commit a `.divinci/config.json` to your project to share workspace settings with your whole team:
+
+```json
+{
+  "workspaceId": "ws_abc123",
+  "apiUrl": "https://api.divinci.app"
+}
+```
+
+Each developer's personal credentials from `~/.config/divinci/credentials.json` are used for the API key — the project config only sets non-secret values.
+
+## Commands Reference
+
+### `auth` — Manage credentials
+
+```bash
+divinci auth login                   # OAuth browser flow (default)
+divinci auth login --use-api-key     # Prompt for an API key instead
+divinci auth login --profile staging # Save to a named profile
+divinci auth status                  # Show current auth info
+divinci auth whoami                  # Alias for auth status
+divinci auth logout                  # Remove default credentials
+divinci auth logout -y               # Remove without confirmation
+```
+
+---
+
+### `chat` — Conversations
+
+```bash
+# Interactive REPL (supports /help, /new, /exit)
+divinci chat
+
+# Send a message to an existing conversation
+divinci chat send <transcriptId> "Your message here"
+divinci chat send <transcriptId> "Summarize this" --stream   # stream tokens
+
+# List conversations
+divinci chat list
+divinci chat list --limit 20 --offset 40
+
+# View message history for a conversation
+divinci chat history <transcriptId>
+divinci chat history <transcriptId> --limit 50
+```
+
+| Flag | Description |
+|------|-------------|
+| `--stream` | Stream response tokens as they arrive |
+| `--limit <n>` | Max results to return |
+| `--offset <n>` | Skip the first N results (for pagination) |
+
+---
+
+### `rag` — Knowledge Base
+
+```bash
+# Semantic search across your indexed content
+divinci rag search "pricing information"
+divinci rag search "refund policy" --limit 5 --min-score 0.7
+
+# Upload a file for RAG indexing
+divinci rag upload ./knowledge.pdf --targets <vectorId> --wait
+divinci rag upload ./manual.pdf --targets <vectorId> --chapter-aware --title "Product manual"
+
+# List all indexed files
+divinci rag files
+divinci rag files --page 2 --limit 25 --status ready
+
+# Check the processing status of a specific file
+divinci rag status <fileId>
+
+# Source URL backlinks — the page a file links to on chat context bubbles
+divinci rag set-source-url --file-id <fileId> --url https://example.com/page
+divinci rag set-source-url --file-id <fileId> --clear
+
+# Scrape one page, or crawl a whole site, into one or more vector indexes.
+# --vector accepts a comma-separated list to target multiple indexes
+# (e.g. a Vectorize + Qdrant + PageIndex trio) in a single pass.
+divinci rag crawl https://example.com/docs --vector <vectorId>
+divinci rag crawl https://example.com --vector idA,idB,idC --multi --sitemap --limit 500
+
+# Re-scrape stale pages after the source content changed (ignores the cache):
+divinci rag crawl https://example.com --vector <vectorId> --multi --force-refresh
+```
+
+| Flag | Description |
+|------|-------------|
+| `--multi` | Follow links from the URL (site crawl) instead of one page |
+| `--sitemap` | Discover pages via the site's sitemap (`--multi`) |
+| `--limit <n>` | Max pages in `--multi` mode |
+| `--force-refresh` | Re-fetch every page from its URL, ignoring the cached copy. Use when the source content (or the scraper) changed and you need fresh content. |
+| `--ignore-saved` | Incremental crawl — **skips** pages already saved for this host (only fetches new paths). Does **not** refresh stale pages; use `--force-refresh` for that. |
+| `--wait` | Poll until indexed, then run a retrieval-health self-check on the result |
+
+:::caution[Scraper choice]
+`rag crawl` defaults to the free self-hosted `@divinci-ai/fetch-scraper`.
+Pass `--scraper @mendable/firecrawl` only when you need FireCrawl Cloud's
+JavaScript rendering — it is **credit-metered**, and a full-site crawl can
+exhaust an account's monthly credits in minutes.
+:::
+
+:::caution[`--limit` defaults to 25]
+In `--multi` mode, `--limit` defaults to **25 pages** and silently stops
+there — a sitemap crawl of a larger site will look like it succeeded while
+only indexing the first 25 URLs it discovered. Pass an explicit
+`--limit <n>` sized to the site (e.g. `--limit 100`) for anything bigger
+than a handful of pages.
+:::
+
+```bash
+# Check crawl progress without blocking (or from a different terminal than
+# the one that started the crawl) — reads the same crawl-history endpoint
+# `--wait` polls internally, but doesn't start a new crawl.
+divinci rag crawl-status example.com
+divinci rag crawl-status example.com --crawl-id <crawlId>   # path-level detail
+```
+
+:::note[`--force-refresh` swaps to a new vector — it doesn't mutate the old one]
+A `--force-refresh` crawl ingests into a fresh **draft clone** of the target
+vector and, on completion, repoints any release using that vector to the
+draft — the original vector id is left untouched forever. If you're
+watching a vector id for new points after a refresh and it looks frozen,
+you're probably watching the wrong one: check what the *release* now points
+to (`divinci release get <releaseId>`, look at `ragIndex`/`ragIndexes`), or
+list all vectors carrying the same title stem:
+
+```bash
+divinci rag targets list --filter "My Docs Vector"
+```
+
+which surfaces the live vector next to any in-flight or orphaned
+`(draft <timestamp>)` clones of it.
+:::
+
+| Flag | Description |
+|------|-------------|
+| `--limit <n>` | Max results |
+| `--min-score <f>` | Minimum relevance score (0–1), e.g. `0.7` |
+| `--page <n>` | Page number for file listing |
+| `--status <s>` | Filter files by status: `ready`, `processing`, `error` |
+
+The `rag` group also includes vector-index maintenance subcommands —
+`targets`, `reindex`, `config`, `groups`, `health`, `chunks`, `synthesize`,
+`products`, `test-retrieval`, `events`, `dedupe-chunks`, `dedupe-files`,
+`scan-artifacts`, and more — run `divinci rag --help` for the full set.
+
+---
+
+### `docs` — Divinci Docs assistant
+
+Add the Ask-Divinci assistant to an existing docs site, or keep its knowledge
+base in sync with the published docs.
+
+```bash
+# Mode A: provision a Release, crawl your docs into it, print the embed snippet
+divinci docs add https://docs.example.com --name "Docs Assistant"
+
+# Mode B: generate a Starlight site (with the assistant) from a local repo
+divinci docs generate ./my-project --out ./docs-site
+
+# Print the embed snippet for a Release you already have
+divinci docs snippet <releaseId> --kind astro
+
+# Report which docs changed since a git ref — REPORT ONLY, see the warning below
+divinci docs sync --since HEAD~1 --base-url https://docs.example.com
+```
+
+:::caution[`sync` does not re-ingest]
+`divinci docs sync` **lists** the docs that changed since a git ref. It does
+not update the Release's knowledge base, and its `--vector` flag is accepted
+but ignored — it exists only for flag compatibility. To actually refresh a
+published Release's vector:
+
+```bash
+divinci connectors web-crawl <url> --vector <vectorId> --swap [--recurring]
+```
+
+`--swap` is what makes the refresh safe: the new crawl is built alongside the
+live vector and swapped in on success, so a failed re-crawl leaves the
+assistant answering from the previous corpus rather than from nothing.
+:::
+
+Full guide: [Divinci Docs](/guides/divinci-docs/).
+
+---
+
+### `release` — Releases
+
+```bash
+# List and inspect
+divinci release list
+divinci release list --status active --limit 10
+divinci release get <releaseId>
+
+# Create — blank, or fork an existing release
+divinci release create --name "My Release"
+divinci release create --name "Arena variant" --from <releaseId> --assistant-id <toolId>
+
+# Create pre-configured with tools discovered from an MCP server
+divinci release create-from-mcp --url https://mcp.example.com --name "MCP Release"
+
+# Update (GET-then-merge; safe for single-field changes)
+divinci release update <releaseId> --name "Renamed"
+divinci release update <releaseId> --require-signed-anonymous-chat
+divinci release update <releaseId> --fallback-assistants '[{"id":"...","finetune":false}]'
+
+# Attach a contextual CTA card (shown inline when a reply matches triggerKeywords)
+divinci release update <releaseId> --chat-cta '{"title":"Interested in real estate investing?","teaserText":"Get our free guide.","triggerKeywords":["real estate investing","1031","multifamily"],"ctaType":"link-out","targetUrl":"https://lp.example.com/guide","active":true}'
+
+# Lifecycle
+divinci release publish <releaseId>
+divinci release delete <releaseId>
+
+# Clone across workspaces
+divinci release clone <releaseId> --to-workspace <id> --name "Copy"
+
+# Derive a WCAG-legible chat theme from your storefront into a DRAFT release
+divinci release derive-theme <releaseId> --from https://example.com
+```
+
+| Flag | Description |
+|------|-------------|
+| `--status <s>` | (`list`) Filter by status: `active`, `draft`, `archived` |
+| `--limit <n>` | (`list`) Max results |
+| `--name <name>` | (`create`, required) Release name |
+| `--from <releaseId>` | (`create`) Fork an existing release — copies RAG, moderation, prefixes, assistant config |
+| `--assistant-id <toolId>` | (`create --from`) Override the forked release's AI Model selection |
+| `--url <url>` | (`create-from-mcp`, required) MCP server URL to discover tools from |
+| `--fallback-assistants <json>` | (`update`) Ordered fallback model chain |
+| `--require-signed-anonymous-chat` / `--no-…` | (`update`) Toggle the anonymous-chat HMAC requirement |
+| `--rerank-max-chunks <n>` | (`update`) Cap RAG chunks after merge-rerank |
+| `--ai-gateway` / `--no-ai-gateway` | (`update`) Toggle Cloudflare AI Gateway routing |
+| `--response-cache` / `--response-cache-ttl <s>` | (`update`) Public response cache controls |
+| `--chat-cta <json>` | (`update`) Contextual CTA card. JSON object with `title`, `teaserText`, `triggerKeywords[]`, `ctaType` (`link-out`\|`email-gated-download`), `targetUrl`, `active`. Stored as a referenced sub-document — see the [Chat CTAs guide](/guides/chat-cta/). |
+| `--to-workspace <id>` | (`clone`, required) Destination workspace |
+| `--rag-id-map <json>` / `--rag-id-map-file <path>` | (`clone`) Remap RAG vector ids in the copy |
+
+`update` also exposes context-cache (`--context-cache-mode`, `--context-cache-ttl-minutes`,
+`--adaptive-ttl`, `--no-cache-system-prompt`), RAG-trigger (`--rag-trigger`,
+`--rag-trigger-min-chars`), and product sub-reply flags — run
+`divinci release update --help` for the full set.
+
+---
+
+### `hermes` — Hosted Hermes Agents
+
+```bash
+# Create an agent (platform model by default — no provider key needed)
+divinci hermes create --title "Support Bot"
+divinci hermes create --title "Docs Agent" --release <releaseId>       # RAG-grounded
+divinci hermes create --title "Claude Agent" \
+  --model "anthropic/claude-sonnet-4-5" \
+  --provider anthropic --provider-api-key "$ANTHROPIC_API_KEY"          # BYOK
+
+# Inspect
+divinci hermes list
+divinci hermes get <agentId>
+
+# Update (partial — only passed flags change)
+divinci hermes update <agentId> --model "vertex_ai/gemini-2.5-pro"
+divinci hermes update <agentId> --release <releaseId>    # link RAG grounding
+divinci hermes update <agentId> --clear-release          # unlink
+divinci hermes update <agentId> --disable                # or --enable
+
+# Chat (auto-retries once on a cold-start 503)
+divinci hermes chat <agentId> "Summarize our refund policy."
+
+# OpenAI-compatible proxy key
+divinci hermes key <agentId>            # show the hsk- key
+divinci hermes key <agentId> --rotate   # revoke + mint a new one
+
+divinci hermes delete <agentId>
+```
+
+See the dedicated [Hermes Agents page](/cli/hermes/) for the full flag
+reference, BYOK rotation, and cold-start behavior.
+
+---
+
+### `terms` — Terms of Service
+
+View/accept a release's ToS, and author the workspace's versioned ToS documents.
+
+```bash
+# Consumer side: check the gate, then accept
+divinci terms show <releaseId>
+divinci terms accept <releaseId>
+
+# Authoring side: draft → publish (publishing bumps the version;
+# EVERY user must re-accept before chatting again)
+divinci terms list
+divinci terms create --title "Terms" --file ./terms.md
+divinci terms get <tosId>
+divinci terms update <tosId> --file ./terms-v2.md
+divinci terms publish <tosId>
+```
+
+---
+
+### `workspace` — Workspaces
+
+Available via both `workspace` and the shorter `ws` alias.
+
+```bash
+# List available workspaces
+divinci workspace list
+divinci ws list --limit 50
+
+# Inspect a specific workspace
+divinci workspace get <workspaceId>
+
+# Set the default workspace for all subsequent commands
+divinci workspace use <workspaceId>
+
+# Create / update / delete
+divinci workspace create --title "Support Bot" --description "Customer support assistant"
+divinci workspace update --title "Renamed"
+divinci workspace delete
+
+# HIPAA: choose it when the workspace is created. Converting a workspace that
+# has already been in use is much harder than starting it scoped.
+divinci workspace baa                       # print the agreement, its version and hash
+divinci workspace create --title "Clinic" --description "Intake assistant" --hipaa
+# Non-interactive: you must supply the acceptance yourself, including the hash of the agreement you read
+divinci workspace create --title "Clinic" --description "Intake assistant" --hipaa \
+  --baa-signer-title "Practice Owner" --baa-org-legal-name "Example Clinic LLC" \
+  --baa-version-hash <hash from `divinci workspace baa`>
+
+# Clone selected RAG vectors into a new workspace (async job)
+divinci ws clone --title "Copy" --rag-vector-ids idA,idB --wait
+divinci ws clone-status <jobId>
+```
+
+**HIPAA workspaces.** `--hipaa` records your acceptance of the Business Associate Agreement and turns on HIPAA scope in the same step: de-identification is forced on and fails closed, and only model providers covered by a BAA can be used. Until Divinci has a BAA with a model provider, chat in a HIPAA workspace is paused. The CLI refuses `--hipaa` when the agreement is not yet available for acceptance, and creates nothing in that case. `--hipaa` cannot be combined with `--host`.
+
+---
+
+### `api` — Raw API Requests
+
+Make authenticated HTTP requests to any Divinci API endpoint. Useful for exploring endpoints or accessing features not covered by a dedicated command.
+
+```bash
+# GET request
+divinci api GET /v1/workspace
+
+# POST with a JSON body
+divinci api POST /v1/chat/message --body '{"content": "Hello"}'
+
+# Pass query parameters
+divinci api GET /v1/files --param limit=10 --param status=ready
+
+# Pass custom headers
+divinci api GET /v1/workspace --header "X-Custom-Header: value"
+```
+
+---
+
+### `config` — Workspace configuration
+
+Read or update the current workspace's title and description without leaving the terminal.
+
+```bash
+divinci config get
+divinci config set-title "Acme Support Bot"
+divinci config set-description "Customer-facing support assistant for orders, returns, and product questions."
+divinci config export
+```
+
+---
+
+### `group` — User group management
+
+Manage user groups within a workspace and invite or remove members. Useful for sharing access with a team.
+
+```bash
+divinci group list
+divinci group get <groupId>
+divinci group create --name "Engineering"
+divinci group update <groupId> --name "Platform Engineering"
+divinci group delete <groupId>
+
+# Invite a user to a group
+divinci group invite <groupId> --email user@example.com
+
+# Remove a user from a group
+divinci group remove-user <groupId> --user <userId>
+```
+
+---
+
+### `permissions` — Permission management
+
+Inspect and edit who can do what within a workspace. Permissions can be granted to users, groups, all-logged-in-users, or anonymous visitors.
+
+```bash
+# List effective permissions on a resource
+divinci permissions list --resource <resourceId>
+
+# Show your own effective permissions
+divinci permissions mine
+
+# Grant or revoke a permission
+divinci permissions grant --resource <resourceId> --principal <userOrGroupId> --role editor
+divinci permissions revoke --resource <resourceId> --principal <userOrGroupId>
+```
+
+---
+
+### `byok` — Bring-your-own-key credentials
+
+Manage provider credentials per workspace (OpenAI, Anthropic, Neo4j, etc.). Secrets are write-only — listed entries show metadata, never the secret value.
+
+```bash
+divinci byok list
+divinci byok get <credentialId>
+divinci byok create --provider openai --key sk-...
+divinci byok rotate <credentialId> --key sk-...
+divinci byok delete <credentialId>
+```
+
+---
+
+### `api-key` — Workspace API keys
+
+Long-lived workspace tokens for daemons and CI. Creation and rotation print the secret exactly once — store it immediately.
+
+`create` requires `--permissions` (a comma-separated list of `<resource>:<action>` grants; wildcards such as `rag:*` are accepted). An unscoped key can do everything in the workspace, so it needs an explicit `--full-access`.
+
+```bash
+divinci api-key list
+divinci api-key create --name "GitHub Actions" --permissions rag:read,chat:read
+divinci api-key create --name "Admin automation" --full-access   # unscoped: everything
+divinci api-key update <keyId> --name "Renamed" --allowed-origins https://example.com
+divinci api-key rotate <keyId>
+divinci api-key delete <keyId>
+
+# Configure per-key request limits
+divinci api-key request-limit <keyId> --max-rpm 60 --max-rpd 10000
+```
+
+---
+
+### `admin` — Platform-admin operations
+
+Requires the `platform-admin` role server-side. Most workspace users will see authorization errors here — that's expected.
+
+```bash
+# Review pending rate-limit upgrade requests
+divinci admin rate-limit-requests list
+divinci admin rate-limit-requests list --status pending
+
+# Approve or deny a specific request
+divinci admin rate-limit-requests decide <requestId> --status approved
+divinci admin rate-limit-requests decide <requestId> --status denied --reason "abuse risk"
+```
+
+---
+
+### `training-data` — Generate training data from RAG
+
+Generate, list, monitor, and export synthetic training examples derived from your indexed RAG content. Useful as input for `qa` and `fine-tune` workflows.
+
+```bash
+divinci training-data generate --rag <ragVectorId>
+divinci training-data list
+divinci training-data status <jobId>
+divinci training-data export <jobId> --format jsonl --out ./out.jsonl
+divinci training-data export-to-rag <jobId> --rag <ragVectorId>
+divinci training-data delete <jobId>
+```
+
+---
+
+### `red-team` — Adversarial probes against a deployed release
+
+Probe a published release against the shared TrustBench corpus (prompt
+injection, jailbreak, system-prompt leak, exfil, harmful content,
+indirect RAG injection, scope violation). One category per request; `--all`
+walks them sequentially. Lower attack-success is better — and a rate is
+only a rate when the category was fully `measured`.
+
+```bash
+divinci red-team plan
+divinci red-team run --release <releaseId> --category prompt-injection
+divinci red-team run --release <releaseId> --all --system-prompt "$(cat prompt.txt)"
+```
+
+`--system-prompt` is what leak probes are graded against. Omit it and
+those probes come back unmeasured, not clean. Alias: `divinci redteam`.
+
+See [Red Teaming](/server/red-team/) for the report fields, defense-layer
+attribution, and the TrustBench benches that share this corpus.
+
+---
+
+### `qa` — Quality assurance test suites
+
+Build, run, and inspect QA test suites against any release. Subdivides into `suites` (definitions), `runs` (executions), and `tests` (cases).
+
+```bash
+# Suite management
+divinci qa suites list
+divinci qa suites get <suiteId>
+divinci qa suites set-scorers <suiteId> --scorers exactMatch,llmJudge
+
+# Run a suite (single or multi-release)
+divinci qa run <suiteId> --release <releaseId>
+divinci qa multi-release-run <suiteId> --releases rel_a,rel_b
+divinci qa estimate-run <suiteId>                   # dry-run cost estimate
+divinci qa arena-run <suiteId> --preset <presetId>  # head-to-head arena style
+
+# Browse run results
+divinci qa runs list --suite <suiteId>
+divinci qa runs get <runId>
+divinci qa runs cancel <runId>
+
+# Test cases (generate Q/A pairs from a RAG file into one or more suites)
+divinci qa tests generate <ragFileId> --suite <suiteId> --release <releaseId>
+divinci qa augment-training-set <suiteId>
+divinci qa calibrate <suiteId>
+
+# Train + snapshot helpers
+divinci qa runs train <suiteId> <runResultId>   # LoRA fine-tune from top-scoring pairs
+divinci qa snapshot-rag-group --rag <ragVectorId>
+divinci qa backfill-release-snapshots <releaseId>
+
+# Publish a ScoredQA run as a signed TrustBench manifest
+divinci qa publish-to-trust <suiteId> --release <releaseId> --scorer <scorerKey>
+
+# Import / export, ratings, winner picks
+divinci qa copy-suite-from <sourceWhitelabelId> <sourceSuiteId>
+divinci qa export <suiteId> --out ./suite.json
+divinci qa import ./suite.json
+divinci qa regenerate <runId>
+divinci qa winner-pick <runId> --winner <variant>
+divinci qa list-ratings <runId>
+divinci qa list-winner-picks <runId>
+divinci qa export-edited-responses <runId> --out ./edits.jsonl
+
+# Grade an AI system Divinci does not run (see QA an External AI System)
+divinci qa external-run <suiteId> --target "Our v2" --answers answers.json --wait   # import answers
+divinci qa external-use <suiteId> [--allow|--deny] --note "who agreed, how"          # consent gate for live runs
+divinci qa external-target-add --name N --url https://... --model M --api-key-env VAR --i-may-send-these-questions
+divinci qa external-targets
+divinci qa external-target-remove <targetId>                                       # also deletes the stored key
+divinci qa external-run-live <suiteId> --target-id <targetId> [--test-ids a,b] [--confirm-cost] --wait
+divinci qa external-runs <suiteId>
+divinci qa external-run-get <runId>
+divinci qa external-run-compare <runId> --against external:<runId>|release:<runResultId>:<releaseId>
+```
+
+The `external-*` commands are documented in [QA an External AI System](/server/external-qa/).
+
+---
+
+### `fine-tune` — Fine-tuning lifecycle
+
+Create, start, and monitor fine-tune jobs. Pair with `training-data` and `qa export-to-qa` for an end-to-end training pipeline.
+
+```bash
+divinci fine-tune list
+divinci fine-tune get <jobId>
+divinci fine-tune create --base-model <model> --training-data <dataId>
+divinci fine-tune start <jobId>
+divinci fine-tune status <jobId>
+divinci fine-tune cancel <jobId>
+divinci fine-tune delete <jobId>
+
+# Cross-feed: fine-tune outputs ↔ QA pipeline
+divinci fine-tune export-to-qa <jobId> --suite <suiteId>
+divinci fine-tune copy-from <sourceJobId>
+```
+
+---
+
+### `audio` — Audio transcript management
+
+Upload and manage audio assets, then turn transcripts into RAG content.
+
+```bash
+divinci audio list
+divinci audio get <audioId>
+
+# Get a signed upload URL for direct PUT
+divinci audio upload-url --content-type audio/mpeg
+
+divinci audio delete <audioId>
+
+# Generate a RAG document from an audio transcript
+divinci audio generate-rag <audioId> --rag <ragVectorId>
+```
+
+---
+
+### `style-pattern` — Per-workspace style rules
+
+Mirror of the Divinci Agent's `stylePattern*` tools. Manage approved, proposed, and edit-captured style rules that shape model output. Includes a training-run subsurface for promoting captured edits into a fine-tune dataset.
+
+```bash
+# Rules
+divinci style-pattern list
+divinci style-pattern list-proposed
+divinci style-pattern list-edits
+divinci style-pattern test-rewrite --text "..." --rule <ruleId>
+divinci style-pattern approve <proposedId>
+divinci style-pattern reject <proposedId>
+divinci style-pattern toggle <ruleId>
+divinci style-pattern audit
+
+# Training runs (capture → export → transition)
+divinci style-pattern training-run-create
+divinci style-pattern training-run-list
+divinci style-pattern training-run-export <runId> --out ./run.jsonl
+divinci style-pattern training-run-transition <runId> --to ready
+```
+
+---
+
+### `arena-preset` — Arena preset management
+
+Configure the side-by-side variants used by `qa arena-run` and the arena UI.
+
+```bash
+divinci arena-preset list
+divinci arena-preset export <presetId> --out ./preset.json
+divinci arena-preset clone <sourcePresetId> --to <newName>
+divinci arena-preset update-variant <presetId> --variant A --model gpt-4o
+```
+
+---
+
+### `notifications` — Notifications & delivery
+
+Workspace notifications plus delivery channels (email/webhook) and tag-routing
+triggers. See [Observability](/server/observability) for the full pipeline.
+
+```bash
+divinci notifications list --unread
+divinci notifications counts
+divinci notifications mark-read <notificationId>
+
+# Delivery channels — where notifications get sent
+divinci notifications channels create --name "Ops" --webhook-url https://ops.example.com/hook --webhook-secret <32+ chars>
+divinci notifications channels create --name "On-call" --email oncall@example.com
+divinci notifications channels verify <channelId>   # email channels
+divinci notifications channels test <channelId>
+divinci notifications channels logs <channelId>     # webhook delivery logs
+
+# Delivery triggers — tag → channel routing
+divinci notifications triggers create --title "Escalations" --any-tags urgent --channels <channelId>
+```
+
+---
+
+### `flagger` — Custom notification flaggers
+
+LLM-driven custom notifications: a flagger evaluates chat traffic with your
+prompt and raises a tagged notification when it flags.
+
+```bash
+divinci flagger create \
+  --title "Refund detector" \
+  --assistant gemini-3-5-flash \
+  --prefix 'Does this ask for a refund? Reply {"flagged": boolean}' \
+  --output-keys flagged --tags refund,urgent --flag-input
+
+divinci flagger test <flaggerId> "I want my money back!"   # dry-run (billed)
+divinci flagger list
+divinci flagger delete <flaggerId>
+```
+
+---
+
+### `feedback` — Message feedback
+
+```bash
+# List feedback (paginated, filtered)
+divinci feedback list
+divinci feedback list --release <id> --sentiment negative --has-text
+
+# Aggregate stats (sentiment / source / per-release breakdown)
+divinci feedback stats
+
+# Inspect a single record
+divinci feedback get <feedbackId>
+```
+
+| Flag | Description |
+|------|-------------|
+| `--release <id>` | Filter to one release |
+| `--sentiment <s>` | Filter by sentiment |
+| `--source <s>` | Filter by feedback source |
+| `--has-text` | Only feedback with a text comment |
+| `--created-after <ms>` / `--created-before <ms>` | Time-range filter (epoch ms) |
+| `--page <n>` / `--limit <n>` | Pagination |
+
+---
+
+### `analytics` — Product analytics
+
+Metrics, trends, per-product performance, A/B experiments, and the conversion
+funnel for your AI releases.
+
+```bash
+divinci analytics metrics --time-range 7d
+divinci analytics trends --granularity daily
+divinci analytics performance --sort-by ctr --limit 25
+divinci analytics experiments --status running
+divinci analytics funnel
+```
+
+---
+
+### `metrics` — Pipeline telemetry & alerts
+
+Per-node latency/error/throughput metrics, CSV export, and custom alert
+configurations routed to in-app, email, or webhook channels.
+
+```bash
+divinci metrics pipeline <pipelineId> --time-range 24h
+divinci metrics export <pipelineId> --format csv
+
+divinci metrics alerts list <pipelineId>
+divinci metrics alerts set <pipelineId> --node-type embedding --metric errorRate \
+  --warning 0.05 --critical 0.2 --webhook https://ops.example.com/alert
+divinci metrics alerts ack <pipelineId> <alertId>
+
+divinci metrics usage <orgName>        # API-key usage stats
+divinci metrics billing-report         # BYOK vs wallet comparison
+```
+
+---
+
+### `trust` — TrustBench (v1 skeletons)
+
+<Aside type="caution">
+  **TrustBench is v1 — runner skeletons only.** The backend evaluator ships **2026-05-09**. Commands accept input and emit structured output today, but verification against attested runs will not produce real signatures until backend deploy. Track readiness in the TrustBench changelog before depending on these in CI.
+</Aside>
+
+```bash
+divinci trust benchmarks                # List available benchmark definitions
+divinci trust run <benchmarkId>         # Execute a benchmark run (skeleton)
+divinci trust list                      # List your recent runs
+divinci trust verify <runId>            # Verify a signed run log
+```
+
+## Global Options
+
+These flags work with every command:
+
+| Option | Description |
+|--------|-------------|
+| `--api-key <key>` | Override the API key for this single invocation |
+| `--workspace <id>` | Override the workspace ID |
+| `--profile <name>` | Use a named profile (default: `default`) |
+| `--api-url <url>` | Override the API base URL |
+| `--json` | Output raw JSON — great for scripting |
+| `--no-color` | Disable ANSI color codes |
+| `--quiet` | Suppress informational output |
+| `--verbose` | Print debug information |
+
+## Scripting & CI/CD
+
+Every command supports `--json` for machine-readable output, making the CLI composable with standard Unix tools.
+
+```bash
+# Extract workspace IDs
+divinci workspace list --json | jq '.[].id'
+
+# Get the top RAG search result
+divinci rag search "shipping policy" --workspace "$WORKSPACE_ID" --json | jq '.[0].content'
+
+# Check a file's indexing status in a script
+STATUS=$(divinci rag status "$FILE_ID" --workspace "$WORKSPACE_ID" --json | jq -r '.status')
+if [ "$STATUS" = "ready" ]; then
+  echo "File is indexed and ready"
+fi
+```
+
+### Always pin `--workspace` in automation
+
+`divinci workspace use <id>` writes the default workspace to a **shared,
+mutable config file** (`~/.config/divinci/credentials.json`). Any other
+process on the same machine — a teammate's shell, a second CI job, an AI
+agent session — can change it between your commands, silently pointing the
+rest of your script at the wrong workspace.
+
+```bash
+# ❌ Fragile in automation — the default can change under you mid-script
+divinci workspace use ws_abc123
+divinci rag files --json
+
+# ✅ Deterministic — every invocation names its workspace
+divinci rag files --workspace ws_abc123 --json
+```
+
+Reserve `workspace use` for interactive shells. In scripts, CI, and agent
+sessions, pass `--workspace <id>` (or set `DIVINCI_WORKSPACE_ID` in an
+isolated environment) on every command.
+
+### CI/CD Authentication
+
+Use environment variables — never `divinci auth login` — in automated environments:
+
+```bash
+export DIVINCI_API_KEY="dv_key_..."
+export DIVINCI_WORKSPACE_ID="ws_abc123"
+
+# Now all commands authenticate automatically
+divinci rag search "deployment checklist" --json
+divinci release list --status active --json
+```
+
+### Multi-Environment Profiles
+
+Keep separate profiles for different environments:
+
+```bash
+# One-time setup
+divinci auth login --profile dev
+divinci auth login --profile production
+
+# Use a specific profile per command
+divinci workspace list --profile production
+divinci rag search "docs" --profile dev
+
+# Or switch the active profile for a session
+export DIVINCI_PROFILE=production
+divinci release list
+```
+
+## Troubleshooting
+
+**`Error: No API key found`**
+
+Run `divinci auth login` to store credentials, or set the `DIVINCI_API_KEY` environment variable.
+
+**`Error: No workspace set`**
+
+Run `divinci workspace list` to find your workspace ID, then `divinci workspace use <id>` to set a default — or pass `--workspace <id>` to individual commands.
+
+**`Error: Unauthorized (401)`**
+
+Your API key may be invalid or revoked. Run `divinci auth status` to check, then `divinci auth login` to re-authenticate with a fresh key from the [dashboard](https://app.divinci.ai/settings/api-keys).
+
+**`Error: Workspace not found (404)`**
+
+The workspace ID stored as your default may no longer exist. Run `divinci workspace list` to see current workspaces and update with `divinci workspace use <id>`.
+
+**`divinci: command not found`**
+
+The global install directory isn't in your `$PATH`. Run `npm bin -g` (or `pnpm root -g`) to find where global binaries are installed, then add that directory to your shell's `$PATH`.
+
+## Next Steps
+
+- [Authentication guide](/getting-started/authentication) — API key types, token scopes, and best practices
+- [Quick Start](/getting-started/quickstart) — SDK integration alongside the CLI
+- [API Reference](https://divinci.ai/api/) — Full REST API documentation

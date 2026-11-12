@@ -1,0 +1,209 @@
+---
+title: Releases
+description: Create, configure, publish, and archive AI assistant Releases.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A **Release** is a deployable AI assistant configuration — its model, prompt, RAG
+indexes, theme, and access rules. Your end users chat against a Release id;
+`divinci.releases` is how you create and manage them.
+
+For the settings that decide *who reaches a Release and what they may spend* —
+voice providers, testing domains, the MCP endpoint, the skill/tool loop, the
+free-chat gate, and paid pricing tiers — see
+**[Channels & Access](/server/channels-access/)**.
+
+## Listing releases in a workspace
+
+```typescript
+const { data, hasMore } = await divinci.releases.list("ws_123", { limit: 20 });
+```
+
+## Creating a release
+
+```typescript
+const release = await divinci.releases.create({
+  workspaceId: "ws_123",
+  name: "Support Assistant",
+  // ...model, prompt, and config fields
+});
+
+console.log(release._id); // the releaseId your client/embed uses
+```
+
+## Reading and updating
+
+```typescript
+const release = await divinci.releases.get("rel_abc123");
+
+// Update a release (top-level)
+await divinci.releases.update("rel_abc123", { name: "Support Assistant v2" });
+
+// Or update a release within an explicit workspace
+await divinci.releases.updateInWorkspace("ws_123", "rel_abc123", { name: "v2" });
+```
+
+<Aside type="caution" title="Partial updates and RAG">
+  Send only the fields you intend to change. The update path treats RAG fields
+  (`ragIndexes`, `ragVectorGroupId`) as present-only — supplying a partial body
+  that omits them will not clear them, but do verify your update payloads when
+  scripting bulk changes to release configuration.
+</Aside>
+
+## Anonymous chat
+
+A Release can serve **anonymous, no-login chat** — the pattern behind public
+marketing pages and embedded landing-page widgets (see the
+[Deploy to Cloudflare Workers](/guides/cloudflare-workers/) guide). Three fields
+control it, and they layer:
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `allowAnonymousChat` | `false` | **Master switch.** While `false`, anonymous chat is rejected with `403 FORBIDDEN`. |
+| `requireSignedAnonymousChat` | `false` | When `true`, anonymous-chat calls must carry a valid landing-page HMAC signature, so only your signing proxy (e.g. a Cloudflare Worker) can reach the endpoint. Only has an effect while `allowAnonymousChat` is `true`. |
+| `maxAnonymousChatMessages` | `1` | Per-conversation message cap. Raise it for multi-turn. |
+
+```typescript
+// Secure public anonymous chat: on, signed, multi-turn
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  allowAnonymousChat: true,
+  requireSignedAnonymousChat: true,
+  maxAnonymousChatMessages: 12,
+});
+```
+
+<Aside type="caution" title="update() is not a partial PATCH">
+For single-field changes, always use `updateInWorkspace(workspaceId, releaseId,
+options)` — it GET-then-merges the full release document before saving. The
+plain `update(releaseId, options)` method hits the v1 consumer endpoint, whose
+handler requires a **full body** and rejects partial payloads (a body without
+`assistant` fails with "Bad assistant").
+</Aside>
+
+<Aside type="caution" title="Why require signing">
+The per-visitor free-message quota is enforced by your **front-end proxy**, not
+the API. With `requireSignedAnonymousChat: false`, anyone who knows the release
+id can call the anonymous-chat endpoint directly and burn your wallet/quota,
+bypassing that gate. For any release fronting a public page, set it `true` and
+share the `LANDING_PAGE_HMAC_KEY` only with your proxy — see the
+[Cloudflare Workers guide](/guides/cloudflare-workers/) for the signing details.
+</Aside>
+
+## Chat CTA
+
+Attach a contextual call-to-action card that renders inline in a chat reply
+when the answer matches your trigger topics — on both anonymous/embed chat and
+signed-in chat:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  chatCTA: {
+    title: "Interested in real estate investing?",
+    teaserText: "Download our free guide.",
+    buttonLabel: "Get instant access",
+    triggerKeywords: ["real estate investing", "1031", "multifamily"],
+    ctaType: "link-out",
+    targetUrl: "https://lp.example.com/playbook",
+    active: true,
+  },
+});
+```
+
+`updateInWorkspace` creates the CTA sub-document and points the release at it in
+one call. Switch `ctaType` to `"email-gated-download"` to capture the lead with
+an inline form before revealing `assetUrl`.
+
+See the [Chat CTAs guide](/guides/chat-cta/) for trigger cadence, the gated
+download flow, CRM sync and versioning.
+
+## MCP server config
+
+A Release can be published as its own **MCP server** — a curated, tenant-scoped
+endpoint your consumers connect their AI assistants to. Set the `mcpConfig`
+object on the release to enable it and choose which tools, guardrails, and
+billing apply:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, "rel_abc123", {
+  mcpConfig: {
+    enabled: true,
+    exposedTools: ["search_knowledge", "send_message"], // omit = all release tools
+    allowAnonymousMcp: false,
+    maxSpendPerTokenCents: 500,            // $5.00 cap per token
+    mcpRateLimit: { requestsPerMinute: 60, requestsPerDay: 10000 },
+  },
+});
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | `false` | **Master switch.** While `false`, the tenant MCP endpoint returns `404`. |
+| `exposedTools` | *(all)* | Allowlist of tool names. Empty/unset exposes all of the release's tools. |
+| `allowedScopes` | *(all)* | Subset of platform scopes the release's tokens may carry. |
+| `allowAnonymousMcp` | `false` | Allow connections with **no** API key or OAuth token. Public/read-only products only. |
+| `maxSpendPerTokenCents` | `1000` | Billing safety cap per token (1000 = $10.00). |
+| `mcpRateLimit` | `{ 60/min, 10000/day }` | Per-minute and per-day request ceilings. |
+
+Once enabled and published, consumers connect to
+`https://mcp.divinci.app/{whitelabelId}/mcp`. See
+**[Release as an MCP Server](/mcp/whitelabel-servers)** for the endpoint,
+authentication options (API key, central OAuth, or your own federated IdP), and
+billing modes.
+
+## Lifecycle
+
+A release moves `draft → available → deprecated`. Publishing and forking are
+**dedicated endpoints**, not status writes:
+
+```bash
+# Publish a draft (it becomes the live release)
+curl -X POST https://api.divinci.app/api/v1/releases/$RELEASE/publish \
+  -H "Authorization: Bearer $TOKEN"
+
+# Fork a published release back into a fresh draft, carrying its full config
+curl -X POST https://api.divinci.app/api/v1/releases/$RELEASE/fork \
+  -H "Authorization: Bearer $TOKEN"
+
+# Retire a release
+curl https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/deprecate \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Deleting a draft is exposed on the SDK:
+
+```typescript
+await divinci.releases.delete("rel_abc123"); // drafts only
+```
+
+<Aside type="danger" title="`activate()` and `archive()` do not work — do not use them">
+Both are implemented as `update(releaseId, { status })`, which PATCHes the
+draft-update handler. That handler **never reads `status`** (it only checks that
+the release *is* a draft), so the call cannot change a release's state. It also
+rejects the near-empty body with `Bad assistant` before doing anything, and
+`"archived"` is not a member of the real status enum
+(`draft | available | active | deprecated`) at all.
+
+Use `POST /api/v1/releases/{id}/publish` to publish and the `deprecate` route to
+retire, as above. Track the changelog for typed replacements — like `clone()`
+and `getAnalytics()`, these two are on the client surface ahead of a working
+implementation.
+</Aside>
+
+## Method reference
+
+| Method | Description |
+|--------|-------------|
+| `list(workspaceId, options?)` | Paginated releases in a workspace. |
+| `get(releaseId)` | Fetch a release. |
+| `create(options)` | Create a release (requires `workspaceId`). |
+| `update(releaseId, options)` | Update a release. |
+| `updateInWorkspace(workspaceId, releaseId, options)` | Update within an explicit workspace. |
+| `activate(releaseId)` | ⚠️ Non-functional — see [Lifecycle](#lifecycle). |
+| `archive(releaseId)` | ⚠️ Non-functional — see [Lifecycle](#lifecycle). |
+| `delete(releaseId)` | Delete a release. |
+
+<Aside type="note">
+  `clone()` and `getAnalytics()` exist on the client surface but are not yet
+  available on the API and currently throw. Track the changelog for availability.
+</Aside>

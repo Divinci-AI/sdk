@@ -1,0 +1,112 @@
+---
+title: Voice, Phone & SMS
+description: Give a Release a real phone number — your assistant answers voice calls and replies to text messages (SMS/MMS), with at-cost usage billed to the workspace wallet.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A Divinci **Release** doesn't have to live in a chat widget. Attach a phone
+number and the same assistant — same model, same knowledge base, same
+moderation — answers **voice calls** and replies to **text messages** at that
+number.
+
+## What you get
+
+- **Voice calls** — callers dial the number and talk to your Release's
+  assistant in real time. Telephony runs on LiveKit SIP trunking; the dialed
+  number resolves server-side to its Release, so each number is pinned to
+  exactly one assistant configuration.
+- **Text messages (SMS & MMS)** — inbound texts get an AI reply from the same
+  Release. Each phone number keeps its own conversation thread per sender, and
+  MMS image attachments are passed to the model (with strict validation of the
+  media source and file type).
+- **Grounded answers everywhere** — the phone surfaces use the Release's RAG
+  knowledge base and moderation config, exactly like web chat.
+
+## Getting a phone number
+
+Per-release phone numbers are provisioned on Twilio and attached to your
+Release by the Divinci team — number provisioning is currently an
+early-access, concierge step rather than a self-serve API.
+[Talk to us](https://meetings.hubspot.com/michael-mooring/divinci-ai) to get a
+number attached to your Release.
+
+Once attached, the number is live immediately: calls route to the voice agent
+and texts get replies, with no additional deploy on your side.
+
+## Usage & billing
+
+Three independent, real costs get charged to the workspace wallet — **at the
+exact rate Divinci itself is billed, no markup**:
+
+1. **Number rental** — Twilio's monthly per-number fee. A failed debit
+   suspends routing on that number (it stops answering) rather than releasing
+   it outright, giving a 7-day grace window to top up before it's actually
+   released back to Twilio.
+2. **Voice-call usage** — LiveKit's per-minute agent + SIP charges, billed
+   against each call's actual duration rounded **up** to the whole minute
+   (standard telephony convention — a 61-second call bills as 2 minutes).
+3. **SMS/MMS usage** — Twilio's per-segment charge (a 160-char GSM-7 chunk),
+   for **both** inbound and outbound messages, with a separate higher rate
+   for MMS.
+
+All three settle into the same NanoUSD wallet every other workspace charge
+uses — there's no separate "phone balance." Every call/message is attributed
+by resolving the Divinci-owned number involved against that workspace's
+adopted number (normalized to E.164 before the lookup, so carrier formatting
+differences never silently drop attribution); a number that never resolves
+to a workspace stays visible for manual reconciliation rather than being
+charged to the wrong tenant.
+
+You can inspect **unbilled** usage — what the next scheduled sweep will
+charge — at any time, from the SDK, CLI, or an MCP-connected agent:
+
+```typescript
+const voice = await divinci.phoneUsage.voice("ws_123");
+// { whitelabelId, callsUnbilled, totalNanoUSDUnbilled, oldestCallStartedAt }
+
+const sms = await divinci.phoneUsage.sms("ws_123");
+// { whitelabelId, messagesUnbilled, totalNanoUSDUnbilled }
+```
+
+```bash
+divinci phone usage voice --workspace ws_123
+divinci phone usage sms --workspace ws_123
+```
+
+Or as plain REST (any workspace API key or OAuth token):
+
+```bash
+curl -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  "https://api.divinci.app/white-label/<workspaceId>/phone-usage/voice"
+
+curl -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  "https://api.divinci.app/white-label/<workspaceId>/phone-usage/sms"
+```
+
+An MCP-connected agent has the same read via the `phone_usage_voice` /
+`phone_usage_sms` tools — see the
+[MCP tool catalog](/mcp/tool-catalog/#phone-billing).
+
+## Related voice features
+
+- **Text-to-speech & voice cloning** — Releases can speak their replies, and
+  you can clone a custom voice for your assistant's TTS output.
+- **Voiceprints** — speaker identification for audio transcripts, so multi-
+  speaker recordings ingest into RAG with the right attribution.
+- **Audio → RAG** — phone-call and meeting recordings can be transcribed and
+  routed into your knowledge base; see
+  [Audio & transcription tools](/mcp/tool-catalog/#audio--transcription).
+
+## FAQ
+
+**Can the same number do both voice and text?** Yes — one number, both
+channels, one Release.
+
+**What happens to a text from an unknown sender?** It starts a fresh thread
+against the number's Release; there is no fallback to another workspace's
+assistant if a number is inactive.
+
+**Is the web voice mode the same thing?** In-browser ambient voice chat is a
+separate, self-serve Release feature — the phone number path is for reaching
+your assistant from any phone, no app required.

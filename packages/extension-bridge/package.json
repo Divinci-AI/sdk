@@ -1,0 +1,52 @@
+{
+  "name": "@divinci-ai/extension-bridge",
+  "version": "0.1.2",
+  "description": "Talk to the Divinci Local Inference browser extension from any website (on-device chat / WebMCP / A2A), with graceful fallback to the Divinci cloud API. Pure TypeScript, no Divinci-internal dependencies — works in any browser.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/assert-packed-deps.mjs && node ../../scripts/assert-version-honesty.mjs",
+    "build": "tsc",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "rm -rf dist tsconfig.tsbuildinfo && tsc",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.19.10",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "divinci",
+    "browser-extension",
+    "on-device",
+    "webgpu",
+    "webmcp",
+    "a2a",
+    "local-llm"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues"
+  },
+  "homepage": "https://sdk.divinci.ai"
+}

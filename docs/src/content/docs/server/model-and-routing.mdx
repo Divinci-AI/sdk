@@ -1,0 +1,146 @@
+---
+title: "Model & Routing"
+description: "What powers a Release — the assistant model, its fallback chain, the languages it will answer in, and the Cloudflare AI Gateway it routes through."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The first group of Release settings: which model answers, what happens when it
+doesn't, which languages it advertises, and how its traffic is routed.
+
+| Setting | Field | In the SDK? |
+| --- | --- | --- |
+| [Assistant model](#the-assistant-model) | `assistant` | via `updateInWorkspace` |
+| [Fallback chain](#fallback-assistants) | `fallbackAssistants` | ✅ |
+| [Languages](#languages) | `supportedLanguages` | ✅ |
+| [AI Gateway](#ai-gateway) | `aiGateway` | ✅ |
+| [Context cache](/server/caching/) | `contextCache` | ✅ |
+
+## The assistant model
+
+`assistant` is a `{ id, finetune }` reference to a model from the catalog — over
+a hundred base and fine-tuned options across providers. Browse them in
+[Model Catalog](/guides/models/); training your own is
+[Fine-tuning](/server/fine-tuning/).
+
+## Fallback assistants
+
+An **ordered** chain the Release falls through to when the primary model returns
+a *retryable* failure. First success wins.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  fallbackAssistants: [
+    { id: "@cf/meta/llama-4-scout", finetune: false },
+    { id: "gemini-3-5-flash", finetune: false },
+  ],
+});
+```
+
+Retryable means a provider `429`, a `5xx`, a capacity or quota error, or a
+timeout — the transient class. A refusal, a malformed prompt, or a content
+filter is **not** retryable and does not fail over: those would fail identically
+on the next model, so retrying would only cost more.
+
+<Aside type="caution" title="The tool loop has its own separate chain">
+`fallbackAssistants` covers the **answering** model. If the Release runs the
+skill/tool loop, its tool-calling model has an independent chain
+(`skillConfig.fallbackToolCallingAssistants`) and does **not** inherit this one.
+A Release whose assistant fails over cleanly can still lose tool use entirely
+when the tool model is the one having an outage — which presents as "the
+assistant stopped using its tools" rather than as an error. See
+[Assistant Tools](/server/tools/#skillconfig-fields-and-defaults).
+</Aside>
+
+## Languages
+
+Which languages the Release advertises and will answer in. Unset, the set is
+**derived from the model** — the platform knows roughly what each family handles:
+
+| Tier | Size | Applies to |
+| --- | --- | --- |
+| All 36 | full platform set | Gemini family |
+| Major (~19) | major world languages | Large open models — Llama 4, Llama 3.3 70B, Qwen3 30B, GLM-4, Kimi K2, Mistral Small, SEA-Lion… |
+| Core (~9) | `en es fr de pt it zh-hans ja ko` | Small models (≤~20B) **and anything unrecognised** |
+
+Matching is a substring test on the lowercased model id, so it tolerates
+provider prefixes and version suffixes. Lock the set explicitly with `custom`:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  supportedLanguages: { mode: "custom", codes: ["en", "es", "fr"] },
+});
+```
+
+Codes are BCP-47 (`es`, `zh-hans`). The resolved set drives two things: the
+server-side response-language allowlist — a `language` request outside the set is
+ignored — and the language switcher your client renders.
+
+<Aside type="note" title="`en` is always included, and an unknown model gets the small set">
+A custom list is filtered to valid platform codes and **always force-includes
+`en`**, so a Release can never end up with no answerable language. Separately: a
+model the rules do not recognise falls back to the ~9-language core set, not to
+all 36. A brand-new large model may therefore advertise fewer languages than it
+actually speaks until a rule is added — set `custom` if that matters to you.
+</Aside>
+
+## AI Gateway
+
+Routes model traffic through a Cloudflare AI Gateway for analytics, rate
+limiting, and caching. **It does not change how the model answers** — same model,
+same prompt, same output; only the path differs.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  aiGateway: { enabled: true, useDefaultGateway: true },
+});
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `enabled` | `false` | Master switch |
+| `useWhiteLabelDefaults` | — | Inherit the workspace's gateway settings — the "use workspace defaults" checkbox |
+| `useDefaultGateway` | `true` | Use Divinci's gateway (`divinci-ai-gateway`) |
+| `gatewayId` | `divinci-ai-gateway` | Your own gateway id when `useDefaultGateway` is false |
+| `customAccountId` | — | Your Cloudflare account id, for a BYO gateway |
+| `cacheTtlSeconds` | `3600` | Sent as `cf-aig-cache-ttl`; bounds how stale a gateway cache hit can be |
+
+Leave `useWhiteLabelDefaults` on unless this Release specifically needs different
+routing from the rest of the workspace — that inheritance is what keeps gateway
+configuration in one place.
+
+<Aside type="caution" title="Gateway caching is a separate cache from context caching">
+`cacheTtlSeconds` caches whole responses at Cloudflare's edge: an identical
+request inside the window gets a stored answer. [Context
+caching](/server/caching/) instead discounts the repeated *prefix* of a prompt at
+the provider. They stack, they are configured independently, and only the
+gateway one can return a response the model never generated — so keep its TTL
+short on anything personalised.
+</Aside>
+
+## Context cache
+
+Cost control, not behaviour: implicit caching is free and on by default, and for
+most Releases needs no attention. Explicit mode adds a TTL you control and can
+cut input-token cost substantially on repeated prompts — worth reaching for once
+you have real volume, not before. Full detail in
+[Caching & Performance](/server/caching/).
+
+## Gotchas
+
+- **A fallback chain is not a failover for bad output.** It fires on transport
+  and capacity errors only. A model that answers badly answers badly.
+- **Every fallback entry should be a model you would be happy to serve.** There
+  is no quality gate between them — position in the array is the whole policy.
+- **Languages are advertised, not enforced on the model.** The allowlist governs
+  what your client offers and what the server accepts as a `language` request; it
+  cannot stop a model replying in something else if asked to in the prompt.
+- **The gateway is observability, not a safety net.** Enabling it does not add
+  retries or failover — that is `fallbackAssistants`.
+
+## Related
+
+- [Model Catalog](/guides/models/) — the models available
+- [Fine-tuning & Training Data](/server/fine-tuning/) — training your own
+- [Caching & Performance](/server/caching/) — context caching in depth
+- [Releases](/server/releases/) — the object all of this lives on

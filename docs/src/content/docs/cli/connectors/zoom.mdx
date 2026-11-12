@@ -1,0 +1,55 @@
+---
+title: Zoom
+description: Ingest Zoom cloud recordings and transcripts into a Divinci RAG vector.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ingests **cloud recordings** and their transcripts from a connected Zoom
+account, so meetings become searchable knowledge.
+
+**Shape:** OAuth redirect. **Provider id:** `zoom`.
+
+## Connect
+
+**Workspace → Setup → Connectors → Zoom → Connect**, or
+`POST /api/v1/connectors/zoom/auth` and open the returned `authUrl`.
+
+## What gets ingested
+
+Recordings from `/users/me/recordings`, over a date window (default: recent
+history) that a query string on the connection can widen or narrow. Local-only
+recordings never reach Zoom's cloud, so they are not visible to any integration
+— including this one.
+
+<Aside type="caution" title="Zoom deletes recordings on its own schedule">
+Cloud recordings are subject to your Zoom plan's retention policy. Once Zoom has
+deleted a recording it cannot be re-ingested, so a connector is not a backup —
+sync early if a meeting matters.
+</Aside>
+
+## Keeping it fresh
+
+Zoom is webhook-driven, but its subscription is configured **once at the
+Marketplace app level** rather than per connection — so there is no per-account
+channel to expire or renew. Connections still fall back to polling at their
+cadence.
+
+## Recall.ai as an alternative
+
+Zoom's own recordings only cover Zoom, and only when cloud recording was on.
+[Recall.ai](/cli/connectors/recall-ai/) sends a bot notetaker into Zoom, Google
+Meet or Microsoft Teams instead, which is the better fit for cross-platform
+meeting capture.
+
+## From the CLI
+
+```bash
+divinci connectors status zoom
+divinci connectors settings zoom --auto-sync on --cadence 1440
+divinci connectors disconnect zoom
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)

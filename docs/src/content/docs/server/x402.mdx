@@ -1,0 +1,121 @@
+---
+title: x402 Payments
+description: Pay for premium, per-call tools using the x402 protocol.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The **x402** protocol lets the platform charge per call for premium tools, settled
+on-chain (Base / Base Sepolia). `divinci.x402` discovers pricing, signs payments
+with a wallet, and tracks receipts. When you configure a wallet with autopay, the
+server SDK pays transparently whenever an API call returns **402 Payment
+Required**.
+
+## Configuring a wallet
+
+Create a wallet from a private key and enable autopay on the client:
+
+```typescript
+import { DivinciServer } from "@divinci-ai/server";
+// Not exported from the package root — viem stays an optional dependency:
+import { createViemX402Wallet } from "@divinci-ai/server/x402-wallet";
+
+const wallet = createViemX402Wallet({
+  privateKey: process.env.X402_PRIVATE_KEY,
+  chainId: 8453, // Base mainnet
+});
+
+const divinci = new DivinciServer({
+  apiKey: process.env.DIVINCI_API_KEY,
+  x402: {
+    enabled: true,
+    wallet,
+    autoPayment: true,
+    maxPaymentUsd: 1.0, // safety cap per call
+    network: "base",
+  },
+});
+```
+
+<Aside type="caution" title="Spend limits">
+  Always set `maxPaymentUsd`. Calls that would exceed it surface a
+  `PaymentRequiredError` instead of paying, keeping a runaway loop from draining
+  the wallet.
+</Aside>
+
+You can also attach a wallet after construction:
+
+```typescript
+divinci.x402.setWallet(wallet);
+console.log(divinci.x402.isEnabled());
+```
+
+## How a payment happens
+
+The wallet **signs** an EIP-3009 `transferWithAuthorization` for the exact amount
+the 402 response requires and returns a payment payload — it does not broadcast.
+The platform's facilitator settles it server-side, then the original request is
+retried with the `X-PAYMENT` header. With `autoPayment: true` this is automatic;
+the only thing you observe is a successful response (and a receipt in history).
+
+## Discovering pricing
+
+```typescript
+const pricing = await divinci.x402.getPricing();
+const toolPrice = await divinci.x402.getToolPrice("premium_search");
+```
+
+## Payment history and balance
+
+```typescript
+const history = await divinci.x402.getPaymentHistory({ limit: 20 });
+const record = await divinci.x402.getPayment(transactionHash);
+const balance = await divinci.x402.getWalletBalance();
+```
+
+## Manual payment
+
+For human-in-the-loop control, leave `autoPayment` off and resolve the payment
+yourself when a 402 surfaces:
+
+```typescript
+const header = await divinci.x402.resolvePaymentHeader(paymentDetails);
+// attach `header` as X-PAYMENT and retry, or:
+const receipt = await divinci.x402.handlePaymentRequired(paymentDetails);
+const verified = await divinci.x402.verifyPayment(receipt);
+```
+
+## Header helpers
+
+Low-level helpers for building integrations on top of x402:
+
+```typescript
+import {
+  X402_PAYMENT_HEADER, // "X-PAYMENT"
+  encodePaymentHeader,
+  extractPaymentDetails,
+} from "@divinci-ai/server";
+
+const details = extractPaymentDetails(responseBody); // parse a 402 body
+const headerValue = encodePaymentHeader(receipt);      // build the X-PAYMENT header
+```
+
+## Method reference
+
+| Method | Description |
+|--------|-------------|
+| `setWallet(wallet)` | Attach a signing wallet. |
+| `isEnabled()` | Whether x402 is configured. |
+| `getPricing()` | List priced tools. |
+| `getToolPrice(name)` | Price for one tool. |
+| `handlePaymentRequired(details)` | Produce a receipt for a 402. |
+| `resolvePaymentHeader(details)` | Produce an `X-PAYMENT` header value. |
+| `getPaymentHistory(options?)` | Recent payments. |
+| `getPayment(txHash)` | A single payment record. |
+| `verifyPayment(receipt)` | Verify a receipt. |
+| `getWalletBalance()` | Current wallet balance. |
+
+<Aside type="note">
+  The MCP SDK has its own x402 surface for paying per **tool call** from an
+  assistant — see <a href="/mcp/payments">MCP x402 Payments</a>.
+</Aside>

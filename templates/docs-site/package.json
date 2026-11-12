@@ -1,0 +1,24 @@
+{
+  "name": "__DIVINCI_PKG_NAME__",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "deploy": "env -u CLOUDFLARE_API_TOKEN wrangler deploy --env=\"\""
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.38.3",
+    "astro": "^6.1.5",
+    "sharp": "^0.33.0",
+    "@divinci-ai/client": "^0.4.5",
+    "@divinci-ai/embed-chat-ui": "^0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  }
+}

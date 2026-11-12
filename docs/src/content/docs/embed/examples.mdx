@@ -1,0 +1,164 @@
+---
+title: Example Workers (Starter Templates)
+description: Ready-to-copy Cloudflare Workers that serve the Divinci embed — anonymous and auth-required variants with every feature flag wired up.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Two small Cloudflare Workers serve live, interactive demo pages of the embed
+client — and double as **starter templates** you can copy to host the embed
+on your own Worker. Each renders a tabbed playground where every tab mounts
+the chat with a different feature-flag preset, displaying the exact
+constructor config it used, so you can see each option in action before
+adopting it.
+
+| Example | Release type | What it demonstrates |
+|---|---|---|
+| `embed-example-protected` | Anonymous (no login to chat) | Anonymous visitor chat, per-device identity, all feature flags |
+| `embed-example-auth` | Auth required | Divinci-login flow, external-user mode, all feature flags |
+
+Both are single-file Workers (`src/index.ts` + `wrangler.toml`), optionally
+fronted by Cloudflare Access for private demos. **Copyable versions live in
+the SDK repo** — clone one, set your `RELEASE_ID`, and `wrangler deploy`:
+
+- [`examples/cloudflare-worker-embed-anonymous`](https://github.com/Divinci-AI/sdk/tree/main/examples/cloudflare-worker-embed-anonymous)
+- [`examples/cloudflare-worker-embed-auth`](https://github.com/Divinci-AI/sdk/tree/main/examples/cloudflare-worker-embed-auth)
+
+If you'd rather start from scratch, the complete minimal starter below is
+self-sufficient.
+
+## Full landing-page template
+
+For a complete, production-shaped **marketing landing page** (not just a bare
+embed) — Astro + React islands on a Cloudflare Worker, with a per-email free
+message quota (Durable Object), magic-link email verification, HMAC-signed
+upstream calls, and 36-locale i18n — start from the open-source template:
+
+- [**`Divinci-AI/divinci-landing-template`**](https://github.com/Divinci-AI/divinci-landing-template)
+
+The entire site re-skins from a single typed `src/brand.config.ts` (identity,
+palette, fonts, links, Divinci release, bios, copy) plus three assets in
+`public/brand/`. Fill it out, `npm run og && npm run build`, then
+`wrangler deploy`:
+
+```sh
+git clone https://github.com/Divinci-AI/divinci-landing-template
+cd divinci-landing-template && npm install
+# edit src/brand.config.ts → identity, palette, divinci.releaseId
+# drop logo.svg / favicon.svg / hero.webp into public/brand/
+npm run og && npm run build && npm run deploy:prod
+```
+
+<Aside type="tip">
+The two single-file Workers below are the right starting point for embedding
+the chat on an existing site; the landing template above is the right starting
+point when you need a whole branded page built around the assistant.
+</Aside>
+
+## Minimal starter
+
+Everything the examples do beyond this is demo chrome. A production
+"embed on a Worker" is just an HTML page with the script tag:
+
+```toml
+# wrangler.toml
+name = "my-divinci-embed"
+main = "src/index.ts"
+compatibility_date = "2024-05-24"
+
+[vars]
+EMBED_SCRIPT_URL = "https://assets.divinci.app/embed-script.js"
+RELEASE_ID = "your-release-id"
+```
+
+```ts
+// src/index.ts
+export interface Env {
+  EMBED_SCRIPT_URL: string;
+  RELEASE_ID: string;
+}
+
+export default {
+  async fetch(_request: Request, env: Env): Promise<Response> {
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My Site</title>
+</head>
+<body>
+  <h1>My site with Divinci chat</h1>
+
+  <script
+    defer
+    src="${env.EMBED_SCRIPT_URL}"
+    divinci-release-id="${env.RELEASE_ID}"
+    message-feedback
+    context-bubbles
+  ></script>
+</body>
+</html>`;
+
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  },
+};
+```
+
+Deploy with `wrangler deploy`. The script auto-mounts a chat for the
+release; add or remove [feature-flag attributes](/embed/reference) as needed.
+
+## What the full examples add
+
+The example workers extend the minimal starter with patterns worth stealing:
+
+- **Preset playground** — a `CONFIG_PRESETS` array drives tabs; switching
+  tabs destroys the current chat (`chat.destroy()`) and re-mounts with the
+  next preset via `new DivinciChat(options)` (manual instantiation instead
+  of auto-mount). Presets cover: context bubbles, product recommendations,
+  metrics, help requests, notifications, message feedback, quick menu,
+  share chat, the toggleable floating widget, and external-user mode.
+- **Deep-linkable presets** — the active preset id lives in the URL hash, so
+  `#message-feedback` opens the page with that preset mounted.
+- **Per-environment config** — `EMBED_SCRIPT_URL` and `RELEASE_ID` come from
+  `wrangler.toml` `[env.*.vars]`, so the same Worker serves develop,
+  staging, and production against different releases.
+- **Optional Cloudflare Access gate** — a `REQUIRE_ACCESS_AUTH` flag turns on
+  JWT validation (via `jose` against your team's `/cdn-cgi/access/certs`)
+  for private demos; the validated user's email renders in the header.
+
+## Behavior that comes from the release, not the embed
+
+Some chat behavior is configured on the [Release](/server/releases) and
+applies automatically — the example pages need no extra options for it:
+
+- **Terms of Service gate** — when the release references a published Terms
+  of Service document, the embed shows a blocking acceptance modal before
+  the first message. Anonymous visitors are tracked per device (persistent
+  anonymous session id); authenticated users per account. Publishing a new
+  ToS version forces re-acceptance on the next interaction.
+- **Welcome message, disclaimer, conversation starters** — all release
+  config, rendered by the embed when present.
+
+<Aside type="tip">
+For an anonymous **landing page** that signs its API calls server-side
+(HMAC) instead of serving the embed iframe, see
+[Deploy to Cloudflare Workers](/guides/cloudflare-workers).
+</Aside>
+
+## Running the examples locally
+
+```bash
+git clone https://github.com/Divinci-AI/sdk.git
+cd sdk/examples/cloudflare-worker-embed-anonymous   # or cloudflare-worker-embed-auth
+pnpm install
+# edit wrangler.toml → RELEASE_ID
+pnpm dev       # wrangler dev — local preview at localhost:8787
+pnpm deploy    # deploy to your Cloudflare account
+```
+
+Point `RELEASE_ID` in `wrangler.toml` at one of your releases (anonymous
+chat enabled for the anonymous example; auth-required for the auth one)
+before deploying.

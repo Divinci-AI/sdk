@@ -1,0 +1,91 @@
+{
+  "schemaVersion": "divinci-docs-template/v1",
+  "exportedFrom": "6a2c9fb64b8b9753d15ffcac",
+  "exportedAtNote": "Stamp the export time at write-time; omitted here for determinism.",
+  "config": {
+    "status": "available",
+    "pinned": false,
+    "autoSyncGenerated": false,
+    "title": "SDK Docs Assistant",
+    "description": "Release created on 7/29/2025, 12:18:07 PM",
+    "allowAnonymousChat": true,
+    "maxAnonymousChatMessages": 15,
+    "requireSignedAnonymousChat": false,
+    "category": "text",
+    "canReply": true,
+    "assistant": {
+      "id": "@cf/google/gemma-4-26b-a4b-it",
+      "finetune": false
+    },
+    "promptModeration": {
+      "noHarmful": {
+        "on": true,
+        "title": "Message considered harmful"
+      },
+      "onTopic": {
+        "title": "Message considered off topic",
+        "minimumTokens": 0,
+        "minimumContext": 0
+      },
+      "custom": []
+    },
+    "notificationFlaggers": {
+      "custom": [],
+      "helpRequests": {
+        "enabled": false
+      }
+    },
+    "deIdentification": {
+      "enabled": false,
+      "engine": "presidio",
+      "strategy": "redact",
+      "piiCategories": [],
+      "preserveContext": true,
+      "storeOriginal": false
+    },
+    "offlineAvailable": false,
+    "routingRules": {
+      "active": true
+    },
+    "styleRewriteEnabled": false,
+    "streamRewritePolicy": "stream-then-correct",
+    "autoFineTuneEnabled": false,
+    "autoFineTuneMinExamples": 50,
+    "autoFineTuneTargetId": null,
+    "proposedAssistantConfig": null,
+    "minorVersion": 30,
+    "mcpConfig": {
+      "enabled": true,
+      "exposedTools": [
+        "search_knowledge"
+      ],
+      "allowAnonymousMcp": true,
+      "maxSpendPerTokenCents": 200
+    },
+    "spendCapCentsPerDay": 500,
+    "freeChatGate": {
+      "mode": "captcha-only",
+      "quota": {
+        "perEmailLifetime": 100,
+        "postVerifyWindowHours": 24,
+        "postVerifyWindowCount": 100,
+        "perDeviceLifetime": 500
+      }
+    },
+    "chatWelcomeMessageOverrides": [],
+    "siteControl": {
+      "enabled": true,
+      "allowedCategories": [
+        "navigation"
+      ]
+    },
+    "aiGateway": {
+      "enabled": true,
+      "useDefaultGateway": true,
+      "useWhiteLabelDefaults": false
+    },
+    "threadPrefix": {
+      "id": "6a2f5023139be4c6963b1ac9"
+    }
+  }
+}

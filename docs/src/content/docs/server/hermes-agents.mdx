@@ -1,0 +1,228 @@
+---
+title: Hosted Hermes Agents
+description: Run isolated NousResearch Hermes agents on Divinci-managed infrastructure — platform or BYOK models, per-turn RAG grounding from a Release, and an OpenAI-compatible proxy key.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A **hosted Hermes agent** is a [NousResearch Hermes](https://nousresearch.com/)
+instance that Divinci runs for you in its own isolated Cloudflare Sandbox
+container — one container per agent, addressed by a stable per-agent key. You
+get a tool-using, self-improving agent without operating a server, and
+`divinci.hermesAgents` is how you manage the fleet.
+
+Each agent has:
+
+- a **model** — a Divinci-paid *platform* model or a bring-your-own-key model,
+- an optional **persona** (system prompt) applied to every turn,
+- an optional **linked Release** whose knowledge base grounds every turn (RAG),
+- an **`hsk-` proxy key** that lets any OpenAI-compatible client drive it.
+
+## Choosing a model
+
+Platform models are hosted and paid for by Divinci — no provider key needed:
+
+| Model id | Notes |
+| --- | --- |
+| `vertex_ai/gemini-2.5-flash` | Default. Fast, tool-capable Gemini on Vertex AI. |
+| `vertex_ai/gemini-2.5-pro` | Most capable Gemini. |
+| `cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Open-weight Llama on Cloudflare Workers AI. |
+
+Or bring your own key for `openai`, `anthropic`, `openrouter`, or `gemini`
+(Google AI Studio) with any `<provider>/<model>` id — e.g.
+`anthropic/claude-sonnet-4-5`. BYOK keys are field-encrypted at rest and never
+returned by the API: reads expose only the provider name and a
+`hasProviderApiKey` boolean.
+
+## Creating an agent
+
+```typescript
+// Platform model — works immediately, no key required
+const agent = await divinci.hermesAgents.create("ws_123", {
+  title: "Support Bot",
+  hermesModel: "vertex_ai/gemini-2.5-flash",
+  systemPrompt: "You are a concise, friendly support agent.",
+});
+
+console.log(agent._id);         // agent id for the management API
+console.log(agent.proxyApiKey); // hsk-… — for OpenAI-compatible clients
+```
+
+<Aside type="caution" title="The proxy key is a spend credential">
+`proxyApiKey` is returned by `create()`, `get()` and `regenerateKey()` only.
+`list()` and `update()` return a `HermesAgentSummary` **without** it, so
+enumerating a workspace never hands out every agent's key at once. Fetch one
+agent's key with `hermesAgents.get(workspaceId, agentId)` (or `divinci hermes
+key <id>`) when you need it, and treat it like any other secret — every
+completion it buys is billed to the workspace.
+</Aside>
+
+```typescript
+// BYOK — provider spend lands on your own account
+const byok = await divinci.hermesAgents.create("ws_123", {
+  title: "Claude Agent",
+  hermesModel: "anthropic/claude-sonnet-4-5",
+  provider: "anthropic",
+  providerApiKey: process.env.ANTHROPIC_API_KEY!, // encrypted at rest
+});
+```
+
+Creation is **lazy** — no container spins until the first chat, so an unused
+agent costs nothing. There is a per-workspace cap on agents (default 10).
+
+## Grounding an agent in a Release (RAG)
+
+Link a [Release](/server/releases/) and every turn retrieves relevant context
+from that Release's knowledge base before the model answers. The agent keeps
+its own model and persona — the Release contributes only grounding content.
+
+```typescript
+const grounded = await divinci.hermesAgents.create("ws_123", {
+  title: "Docs-Grounded Agent",
+  releaseId: "rel_abc123", // 24-hex release id in the same workspace
+});
+
+// Link, swap, or unlink later:
+await divinci.hermesAgents.update("ws_123", grounded._id, { releaseId: "rel_def456" });
+await divinci.hermesAgents.update("ws_123", grounded._id, { releaseId: "" }); // unlink
+```
+
+<Aside type="note" title="Where the context goes">
+  Retrieved chunks are injected into the <em>user message</em> of each turn —
+  Hermes' own sanctioned context channel — so the agent's system prompt stays
+  byte-stable across turns and provider-side prompt caching keeps working.
+  Retrieval is best-effort: if the knowledge base is briefly unavailable, the
+  turn proceeds ungrounded rather than failing.
+</Aside>
+
+## Chatting
+
+```typescript
+const reply = await divinci.hermesAgents.chat("ws_123", agent._id, [
+  { role: "user", content: "Summarize our refund policy." },
+]);
+
+console.log(reply.choices?.[0]?.message?.content);
+```
+
+The response is OpenAI-compatible. Each successful turn is metered as a small
+flat fee to the workspace wallet, escrowed before dispatch and refunded on any
+failure — you pay per successful turn.
+
+<Aside type="caution" title="Cold starts">
+  A container that hasn't chatted recently sleeps. The first turn after a sleep
+  cold-boots it (typically 30–60 seconds). If the boot exceeds the server's
+  bounded warm-up window you'll get **HTTP 503 `{"error": "agent_warming"}`**
+  with a `Retry-After` header while the container keeps starting in the
+  background — retry after ~30 seconds and the turn will go through. Nothing is
+  billed for a 503.
+</Aside>
+
+## Managing the fleet
+
+```typescript
+const agents = await divinci.hermesAgents.list("ws_123");
+
+const one = await divinci.hermesAgents.get("ws_123", agent._id);
+// one.status: "provisioned" (never booted) | "active" | "stopped" (idle-reaped)
+
+await divinci.hermesAgents.update("ws_123", agent._id, {
+  hermesModel: "vertex_ai/gemini-2.5-pro",
+  enabled: false, // disabled agents reject chat with 403
+});
+
+await divinci.hermesAgents.delete("ws_123", agent._id); // stops the container too
+```
+
+Idle containers auto-sleep after ~30 minutes and long-idle agents are marked
+`stopped` by a background sweep. Both are non-destructive — the next chat
+re-provisions transparently.
+
+## Connecting OpenAI-compatible clients
+
+The `proxyApiKey` (`hsk-…`) works with any OpenAI-compatible client — including
+a locally-installed Hermes — via the per-agent proxy:
+
+```bash
+export OPENAI_BASE_URL="https://api.divinci.app/api/v1/hermes-proxy"
+export OPENAI_API_KEY="hsk-your-agent-proxy-key"
+```
+
+The proxy resolves the agent **from the key, server-side** — there is no header
+or path a caller can set to reach a different tenant's container. Rotate the
+key to revoke all clients holding the old one:
+
+```typescript
+const rotated = await divinci.hermesAgents.regenerateKey("ws_123", agent._id);
+console.log(rotated.proxyApiKey); // new hsk-…; the old key is dead
+```
+
+## Proactive wake loop
+
+An agent can wake on a schedule, decide whether it has anything worth saying,
+and either record the result or deliver it. `shadow` runs the full metered turn
+and writes a run row **without** posting; `live` also posts to the Slack home
+channel. It defaults to `shadow`, so enabling the feature can never by itself
+put a message in a customer's channel.
+
+```typescript
+await divinci.hermesAgents.update("ws_123", agent._id, {
+  proactive: {
+    enabled: true,
+    mode: "shadow",
+    schedule: { hour: 9, minute: 0, timezone: "America/Los_Angeles" },
+    intervalHours: 3,          // wake every 3 hours; null ⇒ once a day
+    goals: ["Watch the nightly E2E run and flag new failures"],
+    memories: ["The integration branch is `preview`, not `main`."],
+    deliver: { slack: true },
+  },
+});
+
+// What has it been saying?
+const { runs } = await divinci.hermesAgents.proactiveRuns("ws_123", agent._id, 10);
+```
+
+| Field | Meaning |
+|-------|---------|
+| `enabled` | Master switch. `false` by default. |
+| `mode` | `shadow` (record only) or `live` (also deliver). Defaults to `shadow`. |
+| `schedule` | `{ hour, minute, timezone }` in the agent's own IANA zone. With `intervalHours`, this anchors the **first** wake. |
+| `intervalHours` | Wake every N hours (1-24). `null` ⇒ once a day. |
+| `goals` / `memories` | Admin-authored text, max 50 entries each. |
+| `deliver` | `{ slack?, email?, sms? }`. Merged as a whole, not field-by-field. |
+| `clear` | Send `proactive: null` to remove the config entirely. |
+
+`lastRunAt` is server-managed and deliberately not writable: a client able to
+rewind it could make an agent due again immediately, which is the one field that
+turns a config edit into unbounded spend on the owner's wallet.
+
+<Aside type="caution" title="`intervalHours` multiplies cost by 24 / N">
+  Every wake is **one billed turn** against the workspace wallet — including the
+  ticks that stay silent, because the thinking still happened. `intervalHours: 3`
+  is **8 turns a day, not 1**; `1` is 24.
+
+  In `live` mode it multiplies interruptions too. The practical ceiling for
+  unsolicited messages is 3-5 per day across **all** channels combined — Slack,
+  email and SMS spend from one budget, not three. Short intervals belong in
+  `shadow` mode.
+
+  Whole hours only: `0.5` is rejected rather than rounded, because silently
+  reinterpreting a schedule surfaces later as an unexplained bill.
+</Aside>
+
+<Aside type="tip" title="Skip, never backfill">
+  Wakes are measured from the last run rather than against a wall-clock grid, so
+  a day of downtime produces **one** wake when service returns — not a queue of
+  owed ones. That also makes the cadence immune to daylight saving, where a
+  local-hour grid would drop or repeat a slot on the 23- and 25-hour days.
+
+  `memories` are never auto-harvested from chat history. An unattended loop that
+  ingests what people say is a prompt-injection amplifier: the planted
+  instruction executes on a later tick, with nobody watching the turn happen.
+</Aside>
+
+## See also
+
+- [`divinci hermes` CLI commands](/cli/hermes/) — the same surface from your terminal.
+- [MCP tool catalog](/mcp/tool-catalog/) — `hermes_*` tools for agentic IDEs.
+- [Releases](/server/releases/) — the knowledge-base side of RAG grounding.

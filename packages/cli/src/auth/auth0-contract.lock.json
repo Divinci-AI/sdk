@@ -1,0 +1,71 @@
+{
+  "$comment": [
+    "The CLI<->server authentication contract, pinned.",
+    "",
+    "A token is only usable if the CLI asks Auth0 for the SAME tenant and audience",
+    "the server validates against. Nothing used to check that, and the two drifted:",
+    "cli <=0.2.9 requested prod tokens from the DEV tenant (dev-46tiys6hnb6vbg17,",
+    "audience chat.divinci.app:8081) while prod validates divinci-prod /",
+    "chat.divinci.app:8080. Every /api/v1 call 403'd, re-logging in never helped,",
+    "and the server's fail-open made a valid token, a garbage token and no token",
+    "at all indistinguishable. Fixed in a68180cdd3, shipped in 0.2.10.",
+    "",
+    "`audience` and `issuer` MUST equal the server's AUTH0_AUDIENCE and",
+    "AUTH0_BASE_URL for that environment (Infisical, path /). Changing a value",
+    "here without changing it there re-creates the outage, so this file is a lock:",
+    "tests/unit/auth/auth0-contract.test.ts fails if src/auth/oauth.ts drifts from",
+    "it, and scripts/verify-auth0-contract.mjs checks it against Infisical where",
+    "credentials exist.",
+    "",
+    "Verified against Infisical on 2026-08-12: prod, staging and dev all AGREE.",
+    "",
+    "DEV's audience is the literal string 'http://localhost:8081'. That looks",
+    "like a local value that leaked into a deployed environment, and on",
+    "2026-08-12 it was read that way and nearly 'fixed' on the SERVER side. That",
+    "would have been wrong and would have broken things. The evidence:",
+    "  * Infisical dev AUTH0_AUDIENCE = http://localhost:8081 (what the server",
+    "    validates)",
+    "  * workspace/clients/playwright/.auth/user.json holds a REAL dev-tenant",
+    "    token whose aud includes 'http://localhost:8081', issued by",
+    "    dev-46tiys6hnb6vbg17 -- so it is a registered API in that tenant and is",
+    "    what the dev web client and the E2E suite actually receive",
+    "Server, tenant and web client agreed; only the CLI asked for something else",
+    "('chat.divinci.app:8081'), which is the value that was wrong.",
+    "",
+    "Lesson worth keeping: a config value that LOOKS wrong is not evidence that",
+    "it is wrong. Check what the tenant actually issues before changing the side",
+    "that happens to be easier to reach.",
+    "",
+    "!! deploy/config.json is NOT a source of truth for any of this. It lists",
+    "   prod as divinci.us.auth0.com / 'https://api.divinci.app' and develop as",
+    "   divinci-staging.us.auth0.com; Infisical says divinci-prod.us.auth0.com /",
+    "   'chat.divinci.app:8080' and dev-46tiys6hnb6vbg17 respectively. It is a",
+    "   stale document. Verify against Infisical and the tenant, never that file.",
+    "",
+    "!! SEPARATE, STILL OPEN: the dev Auth0 application does not have the CLI's",
+    "   callback ports registered. `divinci auth login` against dev fails with",
+    "   'unauthorized_client: Callback URL mismatch' before audience validation",
+    "   is even reached. Add http://localhost:8666/8667/8668 to that",
+    "   application's Allowed Callback URLs in the Auth0 dashboard."
+  ],
+  "environments": {
+    "https://api.divinci.app": {
+      "domain": "divinci-prod.us.auth0.com",
+      "audience": "chat.divinci.app:8080",
+      "issuer": "https://divinci-prod.us.auth0.com",
+      "infisicalEnv": "prod"
+    },
+    "https://api.stage.divinci.app": {
+      "domain": "divinci-staging.us.auth0.com",
+      "audience": "chat.stage.divinci.app:8080",
+      "issuer": "https://divinci-staging.us.auth0.com",
+      "infisicalEnv": "staging"
+    },
+    "https://api.dev.divinci.app": {
+      "domain": "dev-46tiys6hnb6vbg17.us.auth0.com",
+      "audience": "http://localhost:8081",
+      "issuer": "https://dev-46tiys6hnb6vbg17.us.auth0.com",
+      "infisicalEnv": "dev"
+    }
+  }
+}

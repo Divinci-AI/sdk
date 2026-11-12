@@ -1,0 +1,176 @@
+---
+title: Bring Your Own Parser or Retriever
+description: Register an HTTPS endpoint you control as a document parser or a search backend. Divinci calls it; it never hosts your code.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+Divinci's RAG pipeline has two slots you can fill with your own service:
+
+| Slot | `toolType` | Runs | Timeout ceiling |
+|---|---|---|---|
+| Document parser | `RAG/Chunker` | once per file, during ingest | 120 s |
+| Search backend | `RAG/Retriever` | on **every chat turn** against a vector that selected it | 5 s |
+
+You register an HTTPS endpoint. Divinci calls it over the network — it never
+runs your code, and there is nothing to upload or deploy to us.
+
+<Aside type="caution" title="A retriever sits in the chat path">
+A parser runs once per file inside an ingest job. A retriever runs on every
+visitor question, and its results are placed in the model's context. The
+5-second ceiling is not a suggestion — it is the budget a chat turn can afford.
+</Aside>
+
+## The contract
+
+**A parser** receives the raw file and returns NDJSON — one chunk object per
+line.
+
+**A retriever** receives a JSON body and returns a JSON object:
+
+```json
+// request
+{ "query": "how do refunds work?", "topK": 5, "minScore": 0.62,
+  "tenant": "wt_8cccddd8febb192d8954b7fa41f3538b", "filters": {}, "config": {} }
+
+// response
+{ "results": [
+  { "id": "doc-42", "text": "Refunds are issued…", "score": 0.78,
+    "metadata": { "title": "Refunds", "sourceUrl": "https://…" } }
+] }
+```
+
+`score` must be in **0–1**. If your backend produces an unbounded score (BM25,
+for example), squash it monotonically before returning — `minScore` is passed
+through untouched and shown to operators, so a raw score makes it meaningless.
+
+`metadata.sourceUrl` becomes a citation link. Omit it rather than inventing
+one; a missing link stays missing instead of becoming a link to nowhere.
+
+<Aside type="tip" title="`tenant` is not your customer's workspace id">
+Each registration gets an opaque `wt_…` token, sent as `tenant` on every call.
+Use it to partition your own storage. It is deliberately **not** the Divinci
+workspace id — you should not learn that, and it does not change if the
+workspace is renamed.
+</Aside>
+
+## Register it
+
+<Tabs>
+<TabItem label="CLI">
+
+```bash
+export ACME_TOKEN=…                       # never pass a secret as a flag
+divinci external-tools create \
+  --type RAG/Retriever \
+  --slug acme-search \
+  --title "Acme Search" \
+  --endpoint https://search.acme.example/divinci \
+  --auth-type bearer \
+  --auth-secret-env ACME_TOKEN
+```
+
+`--auth-secret-env` names an environment variable to read. `ps` is world-readable
+on most systems, so a credential passed literally is visible to every process on
+the machine for the life of the command.
+
+</TabItem>
+<TabItem label="SDK">
+
+```ts
+await divinci.externalTools.create("ws-123", {
+  toolType: "RAG/Retriever",
+  slug: "acme-search",
+  title: "Acme Search",
+  endpointUrl: "https://search.acme.example/divinci",
+  authType: "bearer",
+  authSecret: process.env.ACME_TOKEN,
+});
+```
+
+</TabItem>
+<TabItem label="Web app">
+
+**Setup → Data Sources → External Tools → Register a tool.**
+
+</TabItem>
+<TabItem label="MCP">
+
+`external_tool_create` registers a tool, but **cannot set a credential** —
+`authSecret` is not part of its schema. MCP runs inside an LLM context, and a
+secret passed through it is a secret in a transcript. Register over the CLI,
+SDK or REST API, then manage it from MCP.
+
+</TabItem>
+</Tabs>
+
+The endpoint must be publicly resolvable — registration refuses a host that does
+not resolve rather than accepting it and failing quietly at the first call.
+
+The `slug` is **immutable**: your tool id derives from it
+(`ext:<workspaceId>:<slug>`), and that id is what a vector stores.
+
+## Prove it before pointing a vector at it
+
+```bash
+divinci external-tools health-check <id>
+```
+
+The probe sends a **fixed synthetic request** — never customer data — and
+requires a contract-conforming answer. A host that is merely reachable still
+fails it, which is the point: a 200 carrying the wrong shape is the failure mode
+a status check cannot see.
+
+It is operator-triggered only. Nothing in the ingest path probes you, so a
+broken tool never becomes a loop of health checks against your service.
+
+## What happens when your service is down
+
+Nothing catastrophic, by design:
+
+<Steps>
+
+1. A failed call contributes **zero results** to that chat turn. The turn still
+   returns 200 and the visitor still gets an answer — from whatever other
+   vectors the release has.
+
+2. After **five consecutive failures** the circuit opens for 60 seconds and
+   Divinci stops calling you. Skipped calls are still recorded, so an outage
+   stays visible instead of going quiet the moment we back off.
+
+3. A passing health check closes the circuit immediately.
+
+</Steps>
+
+<Aside type="caution" title="The honest consequence">
+A release whose *only* vector is external answers from no context at all while
+you are down, and the model behaves as if it knows nothing. If that matters,
+give the release a first-party vector too.
+</Aside>
+
+## Limits you cannot raise
+
+`timeoutMs` and `maxResponseBytes` are clamped to platform ceilings. A tool may
+lower them, never raise them — they are the two quantities you control that
+would otherwise be unbounded, and they are what bounds the blast radius of a
+single call.
+
+## What it costs
+
+**Nothing.** Every external tool is free: registering one bills neither you nor
+the workspace, and Divinci takes no cut.
+
+The `pricing` field is still accepted so existing registrations keep working,
+but a declared rate is **not billed to anyone** and produces no income. Do not
+plan revenue around it.
+
+## Before you register a parser
+
+A parser receives **raw customer documents**. That is a data-processing
+relationship between the workspace and you, not between the workspace and
+Divinci — make sure the workspace owner knows what your service does with what
+it receives, and where.
+
+Retrieved text is stamped with its origin (`externalSource.toolId`) so that
+downstream it is distinguishable from the workspace's own corpus. It was never
+ingested, chunked or moderated by Divinci.

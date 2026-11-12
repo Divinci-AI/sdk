@@ -1,0 +1,675 @@
+---
+title: Shared Types
+description: The @divinci-ai/types package — shared TypeScript definitions used across every Divinci SDK.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`@divinci-ai/types` is the shared type vocabulary for the entire SDK. The client,
+server, and MCP packages all depend on it, so a `ChatMessage` is the same shape
+everywhere. It ships as a transitive dependency — you rarely install it directly,
+but you can import its types for your own function signatures.
+
+```bash
+npm install @divinci-ai/types
+```
+
+```typescript
+import type { ChatMessage, Release, RagDocument } from "@divinci-ai/types";
+```
+
+The package also re-exports runtime helpers under subpaths:
+
+| Import | Provides |
+|--------|----------|
+| `@divinci-ai/types` | All the type definitions on this page. |
+| `@divinci-ai/types/schemas` | Zod schemas mirroring the types (`import { schemas }` or named e.g. `ChatMessageSchema`). |
+| `@divinci-ai/types/validation` | `validate`, `validateOrThrow` runtime validators. |
+| `@divinci-ai/types/guards` | Type guards: `isChatMessage`, `isUser`, … |
+
+<Aside type="note">
+  This page documents the most-used types verbatim from source. The full,
+  always-current set lives in the typed source on
+  [GitHub](https://github.com/Divinci-AI/sdk/tree/main/packages/types/src).
+</Aside>
+
+## Core
+
+From `common.ts` — primitives and wrappers shared by every resource.
+
+```typescript
+/** MongoDB ObjectId rendered as a string. */
+type ObjectId = string;
+/** Milliseconds since epoch. */
+type Timestamp = number;
+/** ISO 8601 date string. */
+type ISODateString = string;
+
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+
+interface PaginationOptions {
+  limit?: number;
+  cursor?: string;
+  page?: number; // alternative to cursor
+}
+
+interface PaginatedResponse<T> {
+  data: T[];
+  hasMore: boolean;
+  nextCursor?: string;
+  total?: number;
+}
+
+interface DateRange {
+  startDate?: string; // ISO 8601
+  endDate?: string;
+}
+
+interface SortOptions {
+  field: string;
+  direction: "asc" | "desc";
+}
+
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: { code: string; message: string; details?: Record<string, unknown> };
+}
+
+/** Created/updated/createdBy stamps attached to most resources. */
+interface ResourceMetadata {
+  createdAt: ISODateString;
+  updatedAt: ISODateString;
+  createdBy?: ObjectId;
+}
+```
+
+## Chat
+
+From `chat.ts` — messages, threads, and send options. See the
+[Client Chat guide](/client/chat) for usage.
+
+```typescript
+type MessageRole = "user" | "assistant" | "system";
+type MessageContentType = "text" | "image" | "audio" | "file";
+type ChatVisibility = "private" | "shared" | "public";
+
+interface ChatMessage {
+  id: ObjectId;
+  chatId?: ObjectId;
+  role: MessageRole;
+  content: string;
+  contentType?: MessageContentType;
+  timestamp: ISODateString;
+  tokenCount?: number;
+  context?: ChatMessageContext[];        // RAG sources (context bubbles)
+  products?: ProductRecommendation[];    // catalog matches
+  reactions?: MessageReaction[];
+  metadata?: Record<string, unknown>;
+  arenaVariants?: ArenaResponseVariant[];
+  arenaSelectedIndex?: number;
+  arenaStreamingStatus?: ArenaStreamingStatus;
+  arenaExpectedVariants?: number;
+}
+
+interface ChatThread {
+  id: ObjectId;
+  title?: string;
+  releaseId: ObjectId;
+  ownerId: ObjectId;
+  workspaceId?: ObjectId;
+  messageCount: number;
+  lastMessageAt?: ISODateString;
+  visibility: ChatVisibility;
+  archived: boolean;
+  metadata: ResourceMetadata;
+}
+
+interface SendMessageOptions {
+  content: string;
+  contentType?: MessageContentType;
+  attachments?: MessageAttachment[];
+  stream?: boolean;
+  metadata?: Record<string, unknown>;
+  assistantName?: string;     // pick a specific assistant
+  replyTo?: string;           // reply to a message id
+  override?: SendMessageOverride; // BYOK-pinned releases only
+}
+
+interface ChatResponse {
+  message: ChatMessage;
+  usage: ChatUsage;
+  context?: ChatMessageContext[];
+}
+
+interface ChatUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd?: number;
+}
+
+interface CreateChatOptions {
+  releaseId: ObjectId;
+  title?: string;
+  systemMessage?: string;
+  visibility?: ChatVisibility;
+  metadata?: Record<string, unknown>;
+}
+```
+
+Also exported: `ChatMessageContext`, `ProductRecommendation`, `MessageReaction`,
+`MessageAttachment`, `MessageSentiment`, `MessageFeedbackInput`,
+`AnonymousFeedbackInput`, `SendMessageOverride`, `ChatStreamChunk`,
+`ListChatsOptions`.
+
+## Releases
+
+From `release.ts` — the deployable assistant configuration. See
+[Server Releases](/server/releases).
+
+```typescript
+type ReleaseStatus = "draft" | "active" | "archived";
+type ReleaseAuthMode = "anonymous" | "required" | "optional";
+
+/** A model reference used for the primary assistant and each fallback. */
+interface WhiteLabelReleaseAssistant {
+  id: string;        // catalog model id
+  finetune: boolean; // true if `id` is a fine-tuned model
+}
+
+interface Release {
+  id: ObjectId;
+  name: string;
+  status: ReleaseStatus;
+  workspaceId: ObjectId;
+  authMode: ReleaseAuthMode;
+  config: ReleaseConfig;
+  theme?: ReleaseTheme;
+  allowedOrigins: string[];
+  /** Ordered fallback chain; first success wins on retryable primary failure. */
+  fallbackAssistants?: WhiteLabelReleaseAssistant[];
+  /** MCP server exposure (see Release as an MCP Server). */
+  mcpConfig?: ReleaseMcpConfig;
+  metadata: ResourceMetadata;
+}
+
+interface ReleaseMcpConfig {
+  enabled: boolean;
+  exposedTools?: string[];
+  allowedScopes?: string[];
+  mcpRateLimit?: { requestsPerMinute: number; requestsPerDay: number };
+  allowAnonymousMcp?: boolean;
+  maxSpendPerTokenCents?: number;
+}
+
+interface ReleaseConfig {
+  model?: string;
+  systemPrompt?: string;
+  maxTokens?: number;
+  temperature?: number;          // 0–2
+  ragCollectionIds?: ObjectId[];
+  contextBubbles?: boolean;
+  productRecommendations?: boolean;
+  helpRequests?: boolean;
+  notifications?: boolean;
+  metrics?: boolean;
+  welcomeMessage?: string;
+  chatDisclaimer?: string;
+  conversationStarters?: string[];
+  chatCTA?: ChatCTAInput;        // contextual call-to-action card
+  byokId?: ObjectId;             // route inference through a BYOK provider
+}
+
+// Contextual CTA card. Rendered inline in chat when a reply matches the
+// trigger — keywords (case-insensitive, first match wins) and/or an
+// every-Nth-reply interval. `link-out` opens `targetUrl` in a new tab;
+// `email-gated-download` renders an inline lead-capture form in the chat and
+// reveals `assetUrl` only after a successful submit (leads are stored and
+// synced to the release's CRM config).
+interface ChatCTAInput {
+  title: string;
+  teaserText: string;
+  buttonLabel?: string;
+  triggerKeywords: string[];
+  ctaType: "link-out" | "email-gated-download";
+  active?: boolean;
+  imageUrl?: string;
+  targetUrl?: string;            // required for "link-out"
+  assetUrl?: string;             // "email-gated-download": the gated file
+  successMessage?: string;
+  crmDestination?: string;       // narrow CRM sync: "hubspot" | "attio"
+
+  // Trigger cadence (all optional; default = keywords, once per thread)
+  triggerMode?: "keywords" | "interval" | "keywords-or-interval";
+  intervalMessages?: number;       // fire every Nth assistant reply (1-100)
+  minMessagesBeforeFirst?: number; // don't fire before the Nth reply
+  maxPerThread?: number;           // max fires per conversation (default 1)
+  cooldownMessages?: number;       // min replies between fires
+
+  // Inline form ("email-gated-download"; email always collected)
+  formFields?: Array<"email" | "name" | "phone">;
+  consentText?: string;            // disclaimer under the form
+  requireCaptcha?: boolean;        // Turnstile on submit
+
+  // Optional double-write into the customer's OWN Constant Contact list, in
+  // addition to the Release's CRM sync above.
+  constantContactListId?: string;
+  // Write-only: never returned by any read endpoint, never stored in
+  // versionHistory. Omit on update to keep the existing value; send "" to clear.
+  constantContactAccessToken?: string;
+}
+
+// Read-only versioning envelope returned on a stored CTA (same convention as
+// chat disclaimer / thread prefix / terms of service). Each content change
+// archives the prior revision and advances `version`.
+interface ChatCTAVersionEntry {
+  version: number;
+  savedAt: number;                 // epoch ms
+  source?: "user" | "agent" | "restore";
+  snapshot: ChatCTAContent;        // the CTA's editable fields, minus the
+                                   // write-only Constant Contact token
+}
+
+interface ReleaseTheme {
+  primaryColor?: string;
+  secondaryColor?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  fontFamily?: string;
+  logoUrl?: string;
+  faviconUrl?: string;
+  darkMode?: boolean;
+  customCss?: string;
+}
+
+interface CreateReleaseOptions {
+  name: string;
+  workspaceId: ObjectId;
+  authMode?: ReleaseAuthMode;
+  config?: Partial<ReleaseConfig>;
+  theme?: Partial<ReleaseTheme>;
+  allowedOrigins?: string[];
+  fallbackAssistants?: WhiteLabelReleaseAssistant[];
+}
+```
+
+Also exported: `ContextCacheMode`, `ContextCacheUpdate`, `UpdateReleaseOptions`,
+`ListReleasesOptions`.
+
+## Workspaces
+
+From `workspace.ts` — the top-level container (white-label). See
+[Server Workspaces](/server/workspaces).
+
+```typescript
+type WorkspaceMemberRole = "owner" | "admin" | "editor" | "viewer";
+
+interface Workspace {
+  id: ObjectId;
+  name: string;
+  slug: string;
+  description?: string;
+  ownerId: ObjectId;
+  settings: WorkspaceSettings;
+  limits: WorkspaceLimits;
+  metadata: ResourceMetadata;
+}
+
+interface WorkspaceSettings {
+  defaultModel?: string;
+  defaultTemperature?: number;
+  analyticsEnabled?: boolean;
+  webhooksEnabled?: boolean;
+  notificationEmail?: string;
+}
+
+interface WorkspaceLimits {
+  maxReleases: number;
+  maxRagCollections: number;
+  maxRagStorageBytes: number;
+  maxMonthlyApiCalls: number;
+  maxConcurrentChats: number;
+}
+
+interface WorkspaceMember {
+  userId: ObjectId;
+  role: WorkspaceMemberRole;
+  permissions: string[];
+  joinedAt: string;
+}
+```
+
+Also exported: `CreateWorkspaceOptions`, `UpdateWorkspaceOptions`,
+`ListWorkspacesOptions`.
+
+## Users & tiers
+
+From `user.ts` — end-user identity and membership tiers.
+
+```typescript
+type MembershipTier = "free" | "basic" | "premium" | "enterprise" | "unlimited";
+
+interface User {
+  id: ObjectId;
+  email?: string;
+  name?: string;
+  nickname?: string;
+  picture?: string;
+  emailVerified?: boolean;
+  metadata?: UserMetadata;
+}
+
+interface ApiKeyUser {
+  id: ObjectId;
+  apiKeyId: ObjectId;
+  externalUserId?: string;   // id from your system
+  email?: string;
+  nickname?: string;
+  picture?: string;
+  membershipTier: MembershipTier;
+  lastUsedAt?: ISODateString;
+  createdAt: ISODateString;
+}
+
+interface TierConfig {
+  tier: MembershipTier;
+  limits: TierLimits;
+}
+
+interface TierLimits {
+  messagesPerMonth: number;
+  messagesPerDay: number;
+  maxTokensPerMessage: number;
+  maxConcurrentChats: number;
+}
+
+interface QuotaStatus {
+  tier: MembershipTier;
+  usage: { messagesThisMonth: number; messagesToday: number };
+  remaining: { messagesThisMonth: number; messagesToday: number };
+  exceeded: boolean;
+}
+```
+
+`DEFAULT_TIER_LIMITS: Record<MembershipTier, TierLimits>` is exported as a runtime
+constant with the built-in defaults for each tier. Also exported: `UserMetadata`.
+
+## API keys
+
+From `api-key.ts` — workspace-scoped keys. See [Server API Keys](/server/api-keys).
+
+```typescript
+type ApiKeyStatus = "active" | "revoked" | "expired";
+
+interface ApiKey {
+  id: ObjectId;
+  workspaceId: ObjectId;
+  name: string;
+  keyPrefix: string;          // first 8 chars, for identification
+  status: ApiKeyStatus;
+  allowedOrigins: string[];
+  permissions: string[];
+  allowedTiers?: MembershipTier[];
+  customTierLimits?: Record<MembershipTier, Partial<TierLimits>>;
+  rateLimit?: number;         // requests per minute
+  lastUsedAt?: ISODateString;
+  expiresAt?: ISODateString;
+  createdAt: ISODateString;
+}
+
+/** Only returned once, on creation/rotation. */
+interface ApiKeyWithSecret extends ApiKey {
+  secret: string;
+}
+```
+
+Also exported: `CreateApiKeyOptions`, `UpdateApiKeyOptions`, `ListApiKeysOptions`,
+`ApiKeyUsageStats`.
+
+## RAG
+
+From `rag.ts` — collections, documents, and search results. See
+[Server RAG](/server/rag).
+
+```typescript
+type RagCollectionStatus = "active" | "processing" | "error" | "archived";
+
+type RagDocumentStatus =
+  | "pending" | "uploading" | "processing"
+  | "chunking" | "embedding" | "completed" | "error";
+
+interface RagCollection {
+  id: ObjectId;
+  name: string;
+  description?: string;
+  workspaceId: ObjectId;
+  status: RagCollectionStatus;
+  documentCount: number;
+  chunkCount: number;
+  storageSizeBytes: number;
+  embeddingModel: string;
+  settings: RagCollectionSettings;
+  metadata: ResourceMetadata;
+}
+
+interface RagCollectionSettings {
+  chunkSize: number;           // tokens
+  chunkOverlap: number;        // tokens
+  maxChunksPerQuery: number;
+  similarityThreshold: number; // 0–1
+}
+
+interface RagDocument {
+  id: ObjectId;
+  collectionId: ObjectId;
+  originalName: string;
+  fileType: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  status: RagDocumentStatus;
+  chunkCount: number;
+  error?: string;
+  sourceUrl?: string; // backlink shown on chat context bubbles
+  documentMetadata?: Record<string, unknown>;
+  metadata: ResourceMetadata;
+}
+
+interface RagSearchResult {
+  chunk: RagChunk;
+  score: number; // 0–1
+  document: { id: ObjectId; originalName: string; fileType: string };
+}
+```
+
+Compression strategies are exported as a runtime constant + union:
+
+```typescript
+const COMPRESSION_STRATEGIES = [
+  "none", "exit", "llmlingua2", "recomp-extractive",
+  "recomp-abstractive", "pisco", "clara", "core-rag",
+] as const;
+type CompressionStrategy = typeof COMPRESSION_STRATEGIES[number];
+
+const COMPRESSION_RATIO_MIN = 2;   // keep 50% of tokens
+const COMPRESSION_RATIO_MAX = 128; // keep ~0.8% of tokens
+```
+
+Also exported: `RagChunk`, `CreateRagCollectionOptions`, `UploadDocumentOptions`,
+`RagSearchOptions`, `ListDocumentsOptions`.
+
+## Terms of Service
+
+From `terms.ts` — the versioned ToS gate a release can put in front of message
+sends. See [Terms of Service](/server/releases) and `client.terms`.
+
+```typescript
+interface TermsOfServiceGate {
+  required: boolean;   // whether the caller must (re-)accept
+  tosId?: string;      // document id — pass to accept()
+  version?: number;    // current published version — pass to accept()
+  title?: string;
+  content?: string;    // markdown body of the published terms
+}
+
+interface AcceptTermsInput {
+  tosId: string;
+  version: number;             // stale version → 409
+  anonymousSessionId?: string; // required when no authenticated user
+  releaseId?: string;
+}
+```
+
+Also exported: `TermsNotAcceptedDetails` — the `details` payload attached to a
+403 `TERMS_NOT_ACCEPTED` error.
+
+## Feedback
+
+From `feedback.ts` — the admin-tier **read** surface for message feedback
+(consumers submit via the chat namespace's `MessageFeedbackInput` /
+`AnonymousFeedbackInput` in `chat.ts`).
+
+```typescript
+type FeedbackSource = "authed" | "anonymous";
+
+interface MessageFeedbackRecord {
+  id: string;
+  releaseId: string;
+  messageRef: string;         // server message id, or "anon#<index>"
+  sentiment: -1 | 1 | null;   // thumbs-down / thumbs-up / free-text only
+  feedback?: string;          // free-text the user typed
+  source: FeedbackSource;
+  createdAt: number;          // epoch ms
+  isRead: boolean;
+  // …plus releaseTitle, chatId, userPrompt, responseExcerpt,
+  // userId, email, threadLink
+}
+```
+
+Also exported: `ListFeedbackOptions`, `FeedbackStatsOptions`,
+`FeedbackListResult`, `MessageFeedbackStats`.
+
+## Configuration & x402
+
+From `config.ts` — SDK constructor options and the x402 payment surface.
+
+```typescript
+interface DivinciConfig {
+  apiKey?: string;
+  baseUrl?: string;
+  apiVersion?: string;
+  timeout?: number;
+  maxRetries?: number;
+  headers?: Record<string, string>;
+  debug?: boolean;
+}
+
+interface DivinciClientConfig extends DivinciConfig {
+  releaseId: string;            // required
+  streaming?: boolean;
+  externalUser?: ExternalUserConfig;
+  userToken?: string;
+  wsBaseUrl?: string;
+  workspaceId?: string;
+}
+
+interface DivinciServerConfig extends DivinciConfig {
+  apiKey: string;               // required unless accessToken is set
+  accessToken?: string;
+  defaultWorkspaceId?: string;
+  x402?: X402Config;
+}
+
+interface ExternalUserConfig {
+  userId: string;               // required
+  email?: string;
+  name?: string;
+  nickname?: string;
+  picture?: string;
+  membershipTier?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface X402Config {
+  enabled?: boolean;
+  wallet?: X402Wallet;
+  autoPayment?: boolean;
+  maxPaymentUsd?: number;
+  network?: "base" | "base-sepolia";
+}
+
+/** Signs (does not broadcast) an EIP-3009 transfer authorization. */
+interface X402Wallet {
+  getAddress(): Promise<string>;
+  pay(details: X402PaymentDetails): Promise<X402PaymentReceipt>;
+}
+```
+
+`DEFAULT_CONFIG` (default `baseUrl`, `apiVersion`, `timeout`, `maxRetries`) and
+`API_ENDPOINTS` are exported as runtime constants. Also exported:
+`X402PaymentDetails`, `X402Authorization`, `X402PaymentReceipt`.
+
+## Errors
+
+From `errors.ts` — the data shapes behind the SDK error classes (see
+[Error Handling](/getting-started/error-handling)).
+
+```typescript
+interface DivinciErrorData {
+  code: string;
+  message: string;
+  status?: number;
+  details?: Record<string, unknown>;
+  requestId?: string;
+}
+
+/** Stable machine-readable codes (e.g. "rate_limited", "payment_required"). */
+const ErrorCodes = { /* UNAUTHORIZED, VALIDATION_ERROR, RATE_LIMITED, … */ } as const;
+type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
+interface RateLimitErrorDetails {
+  limit: number;
+  remaining: number;
+  resetAt: number;     // Unix timestamp
+  retryAfter: number;  // seconds
+}
+
+interface PaymentRequiredDetails {
+  x402Version: string;
+  amountUsd: number;
+  amountMicro: number;
+  network: string;     // base | base-sepolia
+  asset: string;       // USDC
+  recipient: string;
+  resource: string;
+  facilitatorUrl: string;
+}
+```
+
+Also exported: `FieldValidationError`, `ValidationErrorDetails`.
+
+## Arena
+
+From `arena.ts` — model A/B comparison. This is a large surface; see
+[Server Arena](/server/arena) for usage and the
+[source](https://github.com/Divinci-AI/sdk/blob/main/packages/types/src/arena.ts)
+for full definitions.
+
+Key exports: `ArenaMode`, `ArenaConfig`, `ArenaVariant`, `ArenaResponseVariant`,
+`ArenaStreamingStatus`, `ArenaInlineScores`, `PipelineTimingMetrics`,
+`ArenaEnableBody` / `ArenaEnableResponse`, `ArenaResultsResponse`,
+`ArenaSelectResponse`, `ArenaTestBody` / `ArenaTestResponse`,
+`ArenaCostEstimateBody` / `ArenaCostEstimateResponse`, `ArenaPreset`,
+`CreateArenaPresetBody` / `UpdateArenaPresetBody`, `ArenaPresetExportFormat`,
+`ArenaRoutingEstimateBody` / `ArenaRoutingEstimateResponse`.
+
+## Meta-harness
+
+From `meta-harness.ts` — autonomous orchestration loops. See the
+[source](https://github.com/Divinci-AI/sdk/blob/main/packages/types/src/meta-harness.ts).
+
+Key exports: `AutonomyLevel`, `OrchestrationLoopStatus`, `IterationStatus`,
+`ProposalKind`, `ProposalStatus`, `MetaHarnessLoop`, `MetaHarnessLoopConfig`,
+`UpdateLoopConfigOptions`, `MetaHarnessIteration`, `IterationReport`,
+`MetaHarnessProposal`, `ListIterationsOptions`, `ListProposalsOptions`,
+`RejectProposalOptions`.

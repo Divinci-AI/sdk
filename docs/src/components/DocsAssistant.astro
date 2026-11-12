@@ -1,0 +1,171 @@
+---
+/**
+ * DocsAssistant: a thin Starlight shell around @divinci-ai/embed-chat-ui — the
+ * open-source "Ask Divinci" widget. The widget (markup, styles, behavior) lives
+ * in the package now; this component only:
+ *   1. passes build-time config (Release id + API origin) to the client, and
+ *   2. maps Starlight's theme tokens → the widget's --divinci-* tokens so it
+ *      tracks the site's light/dark theme (dogfood: same package a customer embeds).
+ *
+ * Build-time config (see astro.config.mjs):
+ *   PUBLIC_DIVINCI_API_URL     — api host (https://api.divinci.app | .stage.)
+ *   PUBLIC_DIVINCI_RELEASE_ID  — the SDK Docs Assistant release id
+ * releaseId unset → nothing mounts (safe default for local/previews).
+ */
+import { getAssistantPageConfig } from "./assistant-page-context";
+
+const releaseId = import.meta.env.PUBLIC_DIVINCI_RELEASE_ID || "";
+const apiUrl = import.meta.env.PUBLIC_DIVINCI_API_URL || "https://api.divinci.app";
+// On-device routing policy (off | fallback | prefer). Admin-set at build/deploy;
+// unset → the widget's default (fallback = local-first when the extension is present).
+const localModel = import.meta.env.PUBLIC_DIVINCI_LOCAL_MODEL || "";
+const enabled = Boolean(releaseId);
+
+// Page-aware starters + hidden context for the current section (build time).
+const pageConfig = getAssistantPageConfig(Astro.url.pathname);
+const suggestionsJson = pageConfig ? JSON.stringify(pageConfig.suggestions) : "";
+const pageContext = pageConfig?.context ?? "";
+---
+
+{
+  enabled && (
+    <div
+      id="divinci-docs-config"
+      data-release-id={releaseId}
+      data-api-url={apiUrl}
+      data-suggestions={suggestionsJson}
+      data-context={pageContext}
+      data-local-model={localModel}
+      hidden
+    />
+  )
+}
+
+<style is:global>
+  /* Raise the widget above the fractal background (z-index 9999) and the
+     glassmorphism page wrapper (z-index 10000). The widget ships its own
+     .da-launcher at z-index 1000 and .da-panel at z-index 1001, both overridden
+     here so they stay clickable above all page layers. */
+  #divinci-docs-assistant {
+    position: relative;
+    z-index: 10010;
+  }
+  #divinci-docs-assistant .da-launcher { z-index: 10011; }
+  #divinci-docs-assistant .da-panel { z-index: 10012; }
+
+  /* ── Launcher gate on the splash hero ─────────────────────────────────
+     Hero.astro stamps data-hero-launcher on <html> and flips it to "shown"
+     once the visitor has scrolled past half the hero. Only the splash page
+     sets it at all, so every other page is unaffected.
+
+     `visibility` (not just opacity) so the hidden pill leaves the tab order
+     — an invisible but focusable button is a keyboard trap. It is delayed to
+     the end of the fade on the way out and zeroed on the way in, which is
+     what makes the transition play in both directions. The panel is a
+     separate fixed element, so an open chat is never hidden by this; the
+     widget already hides the launcher itself via [aria-expanded="true"]. */
+  #divinci-docs-assistant .da-launcher {
+    transition: opacity 0.25s ease, transform 0.25s ease, visibility 0s;
+  }
+  :root[data-hero-launcher="hidden"] #divinci-docs-assistant .da-launcher {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(0.5rem) scale(0.96);
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease, visibility 0s linear 0.25s;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #divinci-docs-assistant .da-launcher,
+    :root[data-hero-launcher="hidden"] #divinci-docs-assistant .da-launcher {
+      transition: none;
+      transform: none;
+    }
+  }
+
+  /* Map Starlight theme tokens → the embed widget's --divinci-* tokens so the
+     assistant tracks the site's light/dark theme. The widget ships its own
+     neutral-dark defaults (zero-specificity), so this map always wins. */
+  #divinci-docs-assistant {
+    --divinci-color-accent: var(--sl-color-accent);
+    --divinci-color-accent-high: var(--sl-color-accent-high);
+    --divinci-color-bg: var(--sl-color-bg);
+    --divinci-color-black: var(--sl-color-black);
+    --divinci-color-white: var(--sl-color-white);
+    --divinci-color-gray-2: var(--sl-color-gray-2);
+    --divinci-color-gray-3: var(--sl-color-gray-3);
+    --divinci-color-gray-4: var(--sl-color-gray-4);
+    --divinci-color-gray-5: var(--sl-color-gray-5);
+    --divinci-color-gray-6: var(--sl-color-gray-6);
+    --divinci-color-gray-7: var(--sl-color-gray-7);
+    --divinci-font: var(--sl-font);
+    --divinci-font-mono: var(--sl-font-mono);
+    --divinci-text-base: var(--sl-text-base);
+    --divinci-text-sm: var(--sl-text-sm);
+    --divinci-text-xs: var(--sl-text-xs);
+    --divinci-shadow-md: var(--sl-shadow-md);
+    --divinci-shadow-lg: var(--sl-shadow-lg);
+    --divinci-nav-height: var(--sl-nav-height);
+    --divinci-sidebar-width: var(--sl-sidebar-width);
+  }
+
+  /* ── Text ON the accent fill ──────────────────────────────────────────
+     The widget uses --divinci-color-white for two different jobs: primary
+     text, and text sitting on the indigo accent. Those coincide only when
+     the palette is dark. Our light theme maps it to Starlight's
+     --sl-color-white, which in light mode is the STRONGEST text colour
+     (near-black) — so every accent-filled surface rendered near-black on
+     indigo. The user bubble was the visible one; the send button, the
+     launcher pill and the visitor-ip chip had it too.
+
+     Cream rather than pure white, to match the page. Light mode only:
+     with the dark palette --divinci-color-white is already light and the
+     widget's own contrast is correct.
+
+     If the widget ever grows a --divinci-color-on-accent token, drop this
+     and map that instead — this is patching around an overloaded one. */
+  :root[data-theme="light"] #divinci-docs-assistant .da-msg-user .da-bubble,
+  :root[data-theme="light"] #divinci-docs-assistant .da-ip-avatar,
+  :root[data-theme="light"] #divinci-docs-assistant .da-send,
+  :root[data-theme="light"] #divinci-docs-assistant .da-launcher,
+  :root[data-theme="light"] #divinci-docs-assistant .da-codegen-action--primary {
+    color: #f8f4f0;
+  }
+</style>
+
+<script>
+  import { mount } from "@divinci-ai/embed-chat-ui";
+
+  const cfg = document.getElementById("divinci-docs-config");
+  if (cfg) {
+    const releaseId = cfg.dataset.releaseId || "";
+    const apiUrl = cfg.dataset.apiUrl || "https://api.divinci.app";
+    const pageContext = cfg.dataset.context || "";
+    // Safe-parse the per-page starters (build-time JSON in a data attribute).
+    let suggestions: Array<{ label: string; message: string }> = [];
+    const rawSuggestions = cfg.dataset.suggestions || "";
+    if (rawSuggestions) {
+      try {
+        const parsed = JSON.parse(rawSuggestions);
+        if (Array.isArray(parsed)) suggestions = parsed;
+      } catch {
+        // Malformed config → no starters, rather than throwing.
+      }
+    }
+    cfg.remove();
+    if (releaseId) {
+      // Divinci-specific destinations (webAppUrl/signupUrl/defaultOpen) use the
+      // package defaults, which derive from the API origin exactly as before.
+      mount(document.body, {
+        releaseId,
+        apiUrl,
+        greeting:
+          "Hi! Ask me anything about the Divinci SDKs — the Client, Server, MCP, CLI, or embed docs. I answer from this site's content.",
+        placeholder: "How do I install the CLI?",
+        suggestions,
+        pageContext,
+        // Admin policy (off|fallback|prefer); undefined → widget default (fallback).
+        localModel: (cfg.dataset.localModel || undefined) as "off" | "fallback" | "prefer" | undefined,
+      });
+    }
+  }
+</script>

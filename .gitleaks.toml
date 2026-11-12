@@ -1,0 +1,22 @@
+# gitleaks config for the Divinci SDK (public: github.com/Divinci-AI/sdk).
+#
+#   gitleaks dir . --config .gitleaks.toml
+#
+# Every allowlisted path below was read by a human and is a FIXTURE or a value
+# that is public by design. Add to this list only after reading the hit.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed fixtures and public-by-design values"
+paths = [
+  # Auth0 SPA domain + client id: shipped to every browser that signs in.
+  '''packages/cli/src/auth/oauth\.ts''',
+  # Vendor catalog prose ("...BYOK...") trips generic-api-key.
+  '''docs/src/data/tool-catalog\.json''',
+  # Test fixtures: tok-12345678, sk_prod_abc…xyz, a JWT whose payload is {"exp":9999999999}.
+  '''packages/cli/tests/unit/commands/byok/.*\.test\.ts''',
+  '''packages/cli/tests/unit/commands/bug-report\.test\.ts''',
+  '''packages/client/tests/namespaces/api-keys\.test\.ts''',
+]

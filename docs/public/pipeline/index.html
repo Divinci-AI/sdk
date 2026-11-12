@@ -1,0 +1,283 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>One document. The whole pipeline. — Divinci AI</title>
+<meta name="description" content="Follow a single PDF through every stage of the Divinci RAG pipeline — parsed, chunked, quizzed, embedded, routed, attacked, guarded, and served.">
+<link rel="canonical" href="https://sdk.divinci.ai/pipeline/">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Divinci AI SDK">
+<meta property="og:locale" content="en">
+<meta property="og:title" content="One document. The whole pipeline.">
+<meta property="og:description" content="Follow a single PDF through every stage of the Divinci RAG pipeline — parsed, chunked, quizzed, embedded, routed, attacked, guarded, and served.">
+<meta property="og:url" content="https://sdk.divinci.ai/pipeline/">
+<meta property="og:image" content="https://sdk.divinci.ai/og/pages/pipeline.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Divinci robot reading a document, beside the words One document. The whole pipeline.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="One document. The whole pipeline.">
+<meta name="twitter:description" content="Follow a single PDF through every stage of the Divinci RAG pipeline — parsed, chunked, quizzed, embedded, routed, attacked, guarded, and served.">
+<meta name="twitter:image" content="https://sdk.divinci.ai/og/pages/pipeline.png">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;600&display=swap">
+<style>
+:root{
+  --ink:#1d2b4a; --paper:#f6f2e9; --rule:#d9d0be;
+  --accent:#8a6b3d; --good:#2f6b4f; --warn:#b9770e; --bad:#a33a2a;
+  --card:#fffdf8;
+  --denim:#4a6d94;
+}
+
+/* Margin annotation — style copied from divinci.app/partners (.cta-note).
+   Same Caveat face, same 2.6px currentColor stroke, same #ctaRough turbulence
+   displacement on the line. The original reveals on hover; there is nothing to
+   hover in a scroll narrative, so --note-p drives it from act progress. */
+.note{position:absolute;width:300px;display:block;pointer-events:none;
+      color:var(--denim);z-index:6;
+      opacity:calc(var(--note-p,0));
+      transform:translateY(calc((1 - var(--note-p,0)) * 6px))}
+.note-text{display:block;font-family:Caveat,"Bradley Hand","Segoe Print",cursive;
+           font-size:2rem;line-height:1.15;text-align:center;
+           transform:rotate(-2.2deg);
+           text-shadow:0 0 6px var(--paper),0 0 12px var(--paper),0 0 18px var(--paper)}
+.note-line{position:absolute;top:37px;right:-134px;width:380px;height:150px;
+           overflow:visible;pointer-events:none}
+.note-line path{stroke-dasharray:200;
+                stroke-dashoffset:calc(200 - 200 * var(--note-p,0))}
+@media (max-width:1180px){ .note{display:none} }
+*{box-sizing:border-box}
+html{scroll-behavior:auto}
+body{margin:0;background:var(--paper);color:var(--ink);
+     font:16px/1.6 "Iowan Old Style",Palatino,Georgia,serif;
+     -webkit-font-smoothing:antialiased}
+h1,h2{letter-spacing:-.02em;font-weight:600;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding:0 5vw}
+
+/* ---- intro ---- */
+/* Two columns so the mascot stands beside the headline rather than under it;
+   collapses to one at 900px, where .robot is hidden outright anyway. */
+.intro{min-height:82vh;display:grid;align-content:center;align-items:center;
+       grid-template-columns:minmax(0,1fr) minmax(0,clamp(240px,28vw,380px));
+       gap:2rem 3vw}
+.intro-copy{display:grid;gap:1.1rem;align-content:center}
+/* Lifted so he floats a little above the headline's own level rather than
+   sitting level with the body copy. */
+.intro .robot{transform:translateY(-3.5rem)}
+@media (max-width:900px){ .intro{grid-template-columns:1fr} }
+.intro h1{font-size:clamp(2.2rem,5.2vw,4rem);line-height:1.05}
+.intro p{max-width:56ch;font-size:1.12rem;opacity:.78;margin:0}
+.eyebrow{font:600 .72rem/1 ui-monospace,Menlo,monospace;letter-spacing:.18em;
+         text-transform:uppercase;opacity:.55}
+.scrollcue{margin-top:1.4rem;font:.8rem/1 ui-monospace,Menlo,monospace;opacity:.5}
+
+/* ---- acts ---- */
+.act{position:relative}
+.stage{position:sticky;top:0;height:100vh;display:grid;
+       grid-template-rows:minmax(0,1fr) auto;align-items:center;
+       gap:2.5vh;padding:4vh 3vw 6vh;max-width:1600px;margin:0 auto}
+.scene{position:relative;width:100%;height:100%;display:grid;justify-items:center}
+/* Percentage heights refused to resolve down this chain (grid row -> .scene ->
+   svg), so the width kept driving the box and a short viewport got a 578px SVG
+   in a 359px row. vh is unconditionally definite, so clamp with that instead. */
+/* max-height is set from the measured row in JS -- a vh cap cannot know how
+   tall the copy under it is, and percentages will not resolve down this chain.
+   The vh value here is only a pre-JS fallback. */
+.scene svg{display:block;width:100%;max-width:1007px;height:auto;
+           max-height:52vh;overflow:visible}
+.copy{max-width:74ch;margin:0 auto;text-align:center}
+.copy h2{font-size:clamp(1.4rem,2.5vw,2.05rem);line-height:1.15;margin-bottom:.5rem}
+.copy p{opacity:.76;margin:0 0 .9rem}
+.copy .chips{justify-content:center}
+.step{font:600 .72rem/1 ui-monospace,Menlo,monospace;letter-spacing:.16em;
+      text-transform:uppercase;color:var(--accent);margin-bottom:.7rem}
+
+/* chips shared by the tool showcases */
+.chips{display:flex;flex-wrap:wrap;gap:.45rem;margin-top:.2rem}
+.chip{font:.78rem/1 ui-monospace,Menlo,monospace;padding:.42rem .7rem;
+      border:1px solid color-mix(in srgb,var(--ink) 18%,transparent);
+      border-radius:2rem;background:var(--card);opacity:.32;
+      transform:translateY(5px);
+      transition:opacity .35s ease,transform .35s ease,border-color .35s ease}
+.chip.on{opacity:1;transform:none;border-color:color-mix(in srgb,var(--accent) 55%,transparent)}
+.chip{display:inline-flex;align-items:center;gap:.4rem}
+/* height-locked, width free: LlamaIndex ships a 554x95 wordmark, and forcing
+   it square would squash it to nothing. */
+.chip-logo{height:15px;width:auto;max-width:68px;object-fit:contain;flex:0 0 auto;
+           /* vendor marks stay their own colour; only the fade is ours */
+           opacity:.92}
+.chip.pick{border-color:var(--good);color:var(--good);
+           background:color-mix(in srgb,var(--good) 8%,var(--card))}
+
+/* two columns at the end: the pitch on the left, the ways in on the right */
+.tail{max-width:1180px;margin:0 auto;padding:0 5vw;min-height:70vh;
+      display:grid;grid-template-columns:minmax(0,1fr) minmax(0,420px);
+      gap:4vw;align-items:center}
+.install{display:grid;gap:1rem;align-content:center}
+.install-card{background:var(--card);border-radius:10px;padding:1.1rem 1.2rem;
+              border:1px solid color-mix(in srgb,var(--ink) 12%,transparent)}
+.install-card h3{margin:0 0 .4rem;font-size:1rem;letter-spacing:-.01em}
+.install-card p{margin:0 0 .7rem;font-size:.9rem;opacity:.72;line-height:1.5}
+.install-card code{font:.84rem ui-monospace,Menlo,monospace;
+                   background:color-mix(in srgb,var(--ink) 7%,transparent);
+                   padding:.18rem .42rem;border-radius:4px}
+.prompt{position:relative;background:color-mix(in srgb,var(--ink) 5%,transparent);
+        border-radius:7px;padding:.7rem .8rem}
+/* room for the copy button so it cannot sit on the first line of the prompt */
+.prompt pre{padding-right:3.6rem}
+.prompt pre{margin:0;font:.78rem/1.55 ui-monospace,Menlo,monospace;
+            white-space:pre-wrap;word-break:break-word;opacity:.85}
+.copy-btn{position:absolute;top:.5rem;right:.5rem;font:600 .7rem ui-monospace,Menlo,monospace;
+      border:1px solid color-mix(in srgb,var(--ink) 22%,transparent);background:var(--card);
+      color:var(--ink);border-radius:5px;padding:.2rem .5rem;cursor:pointer;opacity:.75}
+.copy-btn:hover{opacity:1}
+.agents{list-style:none;margin:.85rem 0 0;padding:0;display:flex;flex-wrap:wrap;gap:.4rem}
+.agents li{display:inline-flex;align-items:center;gap:.35rem;
+           font:.76rem ui-monospace,Menlo,monospace;
+           border:1px solid color-mix(in srgb,var(--ink) 14%,transparent);
+           border-radius:2rem;padding:.28rem .6rem;opacity:.85}
+.agents img{width:16px;height:16px;object-fit:contain}
+@media (max-width:900px){ .tail{grid-template-columns:1fr;gap:2rem} }
+
+.outro{min-height:auto;display:grid;align-content:center;gap:1rem}
+.outro h2{font-size:clamp(1.6rem,3.2vw,2.6rem);line-height:1.12}
+.outro p{opacity:.78;max-width:58ch;font-size:1.1rem;margin:0}
+
+.cta{display:flex;flex-wrap:wrap;gap:.8rem;margin-top:1.6rem}
+.cta a{font:600 .95rem/1 inherit;text-decoration:none;padding:.85rem 1.5rem;
+       border-radius:2rem;transition:transform .18s ease,box-shadow .18s ease}
+.cta a:hover{transform:translateY(-1px)}
+.cta-primary{background:var(--ink);color:var(--paper);
+             box-shadow:0 2px 0 color-mix(in srgb,var(--ink) 45%,transparent)}
+.cta-primary:hover{box-shadow:0 4px 0 color-mix(in srgb,var(--ink) 45%,transparent)}
+.cta-secondary{color:var(--ink);
+               border:1px solid color-mix(in srgb,var(--ink) 30%,transparent)}
+.cta-secondary:hover{border-color:var(--ink)}
+.cta-note{margin-top:1.1rem!important;font-size:.9rem;opacity:.6!important}
+.cta-note code{font:.86rem ui-monospace,Menlo,monospace;
+               background:color-mix(in srgb,var(--ink) 7%,transparent);
+               padding:.22rem .5rem;border-radius:4px}
+.progressbar{position:fixed;left:0;top:0;height:2px;background:var(--accent);
+             width:0;z-index:40;transition:width .1s linear}
+.legend{position:fixed;right:1.4rem;bottom:1.4rem;z-index:30;
+        font:.72rem/1.9 ui-monospace,Menlo,monospace;opacity:.45;text-align:right}
+.legend b{font-weight:600;color:var(--accent)}
+
+/* the mascot presenting the document into stage 01.
+   The poster and the live canvas share this box and its 900/760 aspect -- the
+   pose was calibrated at exactly that viewport, and since fov is vertical, any
+   other aspect crops the document out sideways. Keeping both in one box is what
+   makes the poster -> canvas swap invisible. */
+.robot{position:relative;z-index:2;pointer-events:none;
+       width:100%;aspect-ratio:900/760}
+.robot>*{position:absolute;inset:0;width:100%;height:100%;display:block}
+.robot canvas{opacity:0;transition:opacity .5s ease}
+.robot.live canvas{opacity:1}
+/* Poster stays mounted under the canvas: it is the fallback if the context is
+   lost mid-scroll, and cross-fading from it costs nothing once decoded. */
+.robot.live img{opacity:0;transition:opacity .5s ease}
+
+/* the brush hand, shared across acts */
+.brushlayer{position:fixed;inset:0;pointer-events:none;z-index:20;overflow:hidden}
+.brusharm{position:absolute;left:0;top:0;transform-origin:0 0;opacity:0;
+          will-change:transform,opacity}
+.brusharm video,.brusharm img{display:block;width:100%;height:auto}
+
+@media (max-width:900px){
+  .stage{grid-template-columns:1fr;align-content:center;gap:1.6rem;height:100vh}
+  .copy{max-width:none}
+  .brushlayer{display:none}
+  /* he crowds the diagram once the stage is a single column */
+  .robot{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  .brushlayer{display:none}
+}
+</style>
+
+<svg width="0" height="0" aria-hidden="true" style="position:absolute">
+  <filter id="ctaRough" x="-20%" y="-20%" width="140%" height="140%">
+    <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="n"></feTurbulence>
+    <feDisplacementMap in="SourceGraphic" in2="n" scale="2.6"
+                       xChannelSelector="R" yChannelSelector="G"></feDisplacementMap>
+  </filter>
+</svg>
+
+<div class="progressbar" id="pbar"></div>
+
+<div class="wrap intro">
+  <div class="intro-copy">
+    <div class="eyebrow">For developers</div>
+    <h1>One document.<br>The whole pipeline.</h1>
+    <p>Follow a single PDF from upload to a grounded answer — parsed, chunked,
+       quizzed, embedded, routed, attacked, guarded, and served. Every stage below
+       is a real stage of the Divinci pipeline, and every tool named is one you can
+       actually pick.</p>
+    <div class="scrollcue">Scroll ↓</div>
+  </div>
+  <!-- filled by pipeline.js: poster first, live canvas if the device can take it -->
+  <div class="robot" id="introRobot" aria-hidden="true"></div>
+</div>
+
+<main id="acts"></main>
+
+<div class="tail"><div class="outro">
+  <h2>That's the pipeline.</h2>
+  <p>Eight stages, every one of them configurable — and every one of them
+     measured. Use the entire pipeline as a single API endpoint, or just RAG
+     vector context lookups, and anything in between.</p>
+
+  <div class="cta">
+    <a class="cta-primary" href="/guides/demo-pipeline/">Read the developer docs</a>
+    <a class="cta-secondary" href="https://meetings.hubspot.com/michael-mooring/divinci-ai"
+       target="_blank" rel="noopener">Talk to an engineer</a>
+  </div>
+</div>
+
+<aside class="install">
+  <div class="install-card">
+    <h3>Let your coding agent do it</h3>
+    <p>Paste this into whichever one you already use:</p>
+    <div class="prompt">
+      <pre id="agent-prompt">Install the Divinci CLI (npm i -g @divinci-ai/cli), run `divinci login`, then scaffold a RAG pipeline over ./docs and show me the routes it picks.</pre>
+      <button type="button" id="copy-prompt" class="copy-btn">Copy</button>
+    </div>
+    <ul class="agents">
+      <li><img src="https://pub-fb3e683317b24cf8b4260121edae02be.r2.dev/brand/vendors/claude-code.webp" alt="" width="18" height="18"> Claude Code</li>
+      <li><img src="/pipeline/brand/vendors/codex.svg" alt="" width="18" height="18"> Codex</li>
+      <li><img src="/pipeline/brand/vendors/opencode.svg" alt="" width="18" height="18"> OpenCode</li>
+      <li><img src="https://pub-fb3e683317b24cf8b4260121edae02be.r2.dev/brand/vendors/grok.webp" alt="" width="18" height="18"> Grok Code</li>
+      <li><img src="https://pub-fb3e683317b24cf8b4260121edae02be.r2.dev/brand/vendors/antigravity.webp" alt="" width="18" height="18"> Antigravity</li>
+    </ul>
+  </div>
+</aside>
+</div>
+
+<div class="brushlayer"><div class="brusharm" id="brusharm">
+  <video id="brushvid" muted playsinline loop preload="none"
+         poster="https://pub-fb3e683317b24cf8b4260121edae02be.r2.dev/images/leonardo-brush-still.webp"></video>
+</div></div>
+<div class="legend" id="legend"></div>
+
+<script>
+(function () {
+  var btn = document.getElementById("copy-prompt");
+  var pre = document.getElementById("agent-prompt");
+  if (!btn || !pre) return;
+  btn.addEventListener("click", function () {
+    var done = function () { btn.textContent = "Copied"; setTimeout(function () { btn.textContent = "Copy"; }, 1600); };
+    // clipboard API needs a secure context; fall back to selecting the text
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(pre.textContent).then(done, select);
+    } else select();
+    function select() {
+      var r = document.createRange(); r.selectNodeContents(pre);
+      var sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+      try { document.execCommand("copy"); done(); } catch (e) { btn.textContent = "Select + copy"; }
+    }
+  });
+})();
+</script>
+<script src="/pipeline/pipeline.js"></script>

@@ -1,0 +1,124 @@
+---
+title: Error Handling
+description: The error classes the SDKs throw and how to handle them gracefully.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Every SDK rejects with typed errors so you can branch on failure mode instead of
+parsing strings. The client SDK has the richest hierarchy; the server and MCP
+packages each have a focused error type.
+
+## Client SDK errors
+
+All client errors extend `DivinciError`, which carries the machine-readable
+`code`, the HTTP `status`, an optional `details` object, and the `requestId` for
+support.
+
+| Error | Status | Thrown when |
+|-------|--------|-------------|
+| `AuthenticationError` | 401 | Invalid, missing, or expired credentials |
+| `ValidationError` | 400 | Invalid request parameters (see `fieldErrors`) |
+| `RateLimitError` | 429 | Too many requests (see `retryAfter`, `limit`, `remaining`) |
+| `QuotaExceededError` | 429 | Usage quota for the workspace/release is exhausted |
+| `PaymentRequiredError` | 402 | An x402-priced resource needs payment |
+| `NotFoundError` | 404 | The release, thread, or resource doesn't exist |
+| `NetworkError` | — | Connection failed (see `retryable`) |
+| `TimeoutError` | — | The request exceeded `timeout` |
+| `StreamError` | — | A streaming response failed mid-flight |
+
+```typescript
+import {
+  DivinciClient,
+  RateLimitError,
+  QuotaExceededError,
+  AuthenticationError,
+  PaymentRequiredError,
+} from "@divinci-ai/client";
+
+try {
+  await client.chat.send(thread.id, "Hello!", { assistantName: "your-assistant-id" });
+} catch (error) {
+  if (error instanceof RateLimitError) {
+    // Back off using the server-provided hint
+    await sleep((error.retryAfter ?? 1) * 1000);
+    return retry();
+  }
+
+  if (error instanceof QuotaExceededError) {
+    showUpgradePrompt();
+    return;
+  }
+
+  if (error instanceof AuthenticationError) {
+    redirectToLogin();
+    return;
+  }
+
+  if (error instanceof PaymentRequiredError) {
+    // amount + payment URL are available on the error
+    openCheckout(error.getPaymentUrl(), error.getAmountUsd());
+    return;
+  }
+
+  throw error; // unknown — let it bubble
+}
+```
+
+### Inspecting an error
+
+Every `DivinciError` serializes cleanly for logging:
+
+```typescript
+import { DivinciError } from "@divinci-ai/client";
+
+try {
+  await client.chat.create();
+} catch (error) {
+  if (error instanceof DivinciError) {
+    console.error(error.toJSON()); // { code, status, details, requestId, message }
+  }
+}
+```
+
+<Aside type="tip">
+  Catch the **most specific** error first, then fall back to `DivinciError`, then
+  rethrow anything you don't recognize. Swallowing unknown errors hides bugs.
+</Aside>
+
+## Server SDK errors
+
+The server SDK throws `ServerApiError` for any non-2xx API response. It exposes
+the same fields — `code`, `status`, `details`, `requestId`, plus the raw `body`.
+
+```typescript
+import { ServerApiError } from "@divinci-ai/server";
+
+try {
+  await divinci.workspaces.get("ws_missing");
+} catch (error) {
+  if (error instanceof ServerApiError) {
+    if (error.status === 404) {
+      // handle not found
+    }
+    console.error(error.code, error.requestId);
+  }
+}
+```
+
+## MCP SDK errors
+
+Paid tool calls throw `PaymentRequiredError` (carrying `paymentDetails`) when no
+valid payment accompanies the request. See [MCP x402 Payments](/mcp/payments) for
+the autopay and manual-retry patterns.
+
+## Retry guidance
+
+- **`NetworkError`** — retry only if `error.retryable` is true.
+- **`RateLimitError`** — honor `retryAfter`; use exponential backoff if absent.
+- **`TimeoutError`** — safe to retry idempotent reads; be careful retrying sends.
+- **`AuthenticationError` / `ValidationError`** — never retry blindly; fix the cause.
+
+The SDKs already retry transient failures internally up to `maxRetries`
+(default 3). Tune it per client via the constructor, or pass `skipRetry` on an
+individual request through the underlying HTTP client.

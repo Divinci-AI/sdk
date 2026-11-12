@@ -1,0 +1,103 @@
+---
+title: WordPress
+description: Pull posts, pages and custom post types from a WordPress site's REST API into a RAG vector — divinci connectors wordpress.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Reads a WordPress install over its REST API. Structured, faster and cleaner than
+crawling the rendered site — and it can reach drafts and private posts that a
+crawl never sees.
+
+**Shape:** config-only for public content (credentials are optional and only
+widen reach). **Provider id:** `wordpress`.
+
+## Look at the site first
+
+`wordpress-discover` reports the site's canonical URL, its timezone, and every
+post type WordPress exposes over REST:
+
+```bash
+divinci connectors wordpress-discover https://example.com
+```
+
+<Aside type="tip">
+  A custom post type registered without `show_in_rest: true` is invisible to the
+  REST API entirely — and that is the most common reason a sync completes
+  successfully and ingests nothing. If your CPT is missing from this list, it is
+  a one-line fix on the WordPress side, not a Divinci problem.
+</Aside>
+
+## Connect it
+
+```bash
+# Public content — posts and pages by default
+divinci connectors wordpress https://example.com --vector <vectorId>
+
+# Named post types (use the rest_base from wordpress-discover, not the type name)
+divinci connectors wordpress https://example.com \
+  --vector <vectorId> --post-types posts,pages,protocols
+
+# Daily re-sync, swapping through a draft vector
+divinci connectors wordpress https://example.com \
+  --vector <vectorId> --recurring --swap
+```
+
+## Options
+
+| Flag | What it does |
+| --- | --- |
+| `--vector <id>` | Target RAG vector |
+| `--post-types <list>` | `rest_base` values to ingest (default `posts,pages`) |
+| `--limit <n>` | Max items per post type |
+| `--modified-after <iso>` | Only items modified at/after this ISO-8601 instant |
+| `--category-slugs <list>` | Restrict to these category slugs (posts only) |
+| `--exclude-slugs <list>` | Skip these slugs |
+| `--recurring`, `--cadence <minutes>` | Recurring sync (15-minute floor, default 1440) |
+| `--swap` | Sync into a draft vector, swap the live release on success |
+| `--username <user>` | WordPress username, for non-public content |
+| `--include-non-published` | Also ingest drafts and private posts |
+
+<Aside type="caution">
+  If the target vector is attached to a **published release**, pass `--swap`, or
+  the live-vector guard rejects every chunk write while the sync still reports
+  success.
+</Aside>
+
+## Non-public content
+
+Drafts and private posts require a WordPress
+[Application Password](https://wordpress.org/documentation/article/application-passwords/)
+(WP 5.6+). Pass it via the environment rather than a flag — anything in argv is
+readable by any process on the machine via `ps`:
+
+```bash
+export DIVINCI_WP_APP_PASSWORD='xxxx xxxx xxxx xxxx xxxx xxxx'
+divinci connectors wordpress https://example.com \
+  --vector <vectorId> --username editor --include-non-published
+```
+
+<Aside type="caution">
+  `--include-non-published` puts unfinished and deliberately-restricted content
+  in front of your assistant's users. It ingests `publish`, `draft` and
+  `private` — never `future` (scheduled) or `pending`, which are embargoed.
+</Aside>
+
+If the site redirects (`http→https`, `www→apex`), connect using the
+`resolvedSiteUrl` that `wordpress-discover` reports: an Application Password is
+withheld across a cross-origin hop, so an authenticated connector only works
+against the canonical origin.
+
+## Sync and re-run
+
+WordPress is one of the two providers that can be re-run headlessly:
+
+```bash
+divinci connectors sync <connectionId>
+divinci connectors sync-status <connectionId>
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [Connect an E-commerce Store](/guides/ecommerce-integrations/)

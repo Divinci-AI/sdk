@@ -1,0 +1,72 @@
+---
+title: Model Catalog
+description: Every model Divinci offers across the App, SDK, API, MCP, and CLI — searchable by name, provider, or id.
+---
+
+import ModelList from "../../../components/ModelList/ModelList.tsx";
+
+The Divinci platform exposes one **unified model catalog** across every surface —
+the [Divinci App](https://chat.divinci.ai), the `@divinci-ai/*` SDKs, the
+public API, the Divinci MCP server, and the Divinci CLI. Pick a model once
+and it resolves the same way everywhere: by its stable **catalog id**.
+
+<ModelList client:only="react" />
+
+## How the catalog works
+
+- **Catalog ids are stable.** A model's `id` (e.g. `gemini-3.5-flash-lite`,
+  `@cf/meta/llama-4-scout-17b-16e-instruct`) is the key you pass to the
+  SDK, API, MCP, and CLI. Persisted configs keep resolving even when a vendor
+  renames the underlying runtime string.
+- **Hosting differs by provider.** Google-authored Gemini/Gemma models run on
+  **Google Vertex AI** (Divinci pays — no key needed on the free tier). Open-weight
+  models (`@cf/...`) run on **Cloudflare Workers AI**. You can also bring your
+  own endpoint (`byo:custom`, `local:...`).
+- **Free tier.** Google-authored and Cloudflare-hosted models are free without a
+  Bring-Your-Own-Key (BYOK). Everything else (OpenAI, Anthropic, Mistral,
+  Moonshot/Kimi, …) is **BYOK-only on the free plan** but selectable once you
+  attach a key. The SDK/CLI surface the same policy.
+- **The list is dynamic.** New releases (like the `gemini-3.5-flash-lite`
+  and `gemini-3.8-flash` Vertex launches) land in the server-driven catalog
+  without a client redeploy. The table above is a curated snapshot — always
+  confirm a specific id is available in your plan inside the App, SDK, API, MCP,
+  or CLI.
+
+## Using a model id
+
+The same id works identically on every surface:
+
+```typescript
+import { divinci } from "@divinci-ai/sdk";
+
+// App / SDK / API / MCP / CLI all accept the catalog id
+const release = await divinci.releases.create(workspaceId, {
+  name: "my-release",
+  assistant: { id: "gemini-3.5-flash-lite", finetune: false },
+});
+
+// Or, in the Divinci CLI:
+//   divinci release create --name my-release \
+//     --assistant-id gemini-3.5-flash-lite
+```
+
+## Search via query parameter
+
+The table above filters live as you type. You can also deep-link a filtered
+view with the `q` query parameter — handy for docs, runbooks, and shareable
+links:
+
+- `https://sdk.divinci.ai/guides/models?q=gemini` → all Gemini models
+- `https://sdk.divinci.ai/guides/models?q=vertex` → Vertex-hosted models
+- `https://sdk.divinci.ai/guides/models?q=llama` → Llama / Meta models
+
+The `q` value is synced to the URL (via `history.replaceState`), so the
+filtered state is shareable and the browser back button works.
+
+## Deprecations & migrations
+
+When a vendor announces a model shutdown, Divinci captures it in the server-side
+model-deprecation watch (`resources/server-resources/.../model-deprecations.ts`)
+and migrates runtime usages to the replacement **before** the cutover date, so
+default invocations never 404. If you have persisted configs referencing a retired
+id, the stable-catalog-id pattern keeps them resolving to the GA replacement.

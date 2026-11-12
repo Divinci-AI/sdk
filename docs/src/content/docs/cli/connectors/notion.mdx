@@ -1,0 +1,46 @@
+---
+title: Notion
+description: Ingest Notion pages and databases into a Divinci RAG vector.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ingests pages and database rows from a Notion workspace, flattened to plain text
+with titles preserved.
+
+**Shape:** OAuth redirect. **Provider id:** `notion`.
+
+## Connect
+
+**Workspace → Setup → Connectors → Notion → Connect**, or
+`POST /api/v1/connectors/notion/auth` and open the returned `authUrl`.
+
+<Aside type="tip" title="Notion grants access page by page">
+Notion's consent screen asks you to **select which pages** the integration may
+read; it does not grant the whole workspace by default. A page that was not
+ticked — or a page created later outside a shared parent — is invisible to the
+connector, and shows up as "the sync ran and my newest doc isn't there". Re-open
+the connection in Notion and share the additional pages with the integration.
+</Aside>
+
+## What gets ingested
+
+Pages returned by Notion's search, optionally narrowed by a query string on the
+connection. Rich text is converted to plain text; an untitled page is ingested
+as `Untitled`.
+
+## Keeping it fresh
+
+Polling at the connection's cadence. Notion has no push channel here.
+
+## From the CLI
+
+```bash
+divinci connectors status notion
+divinci connectors settings notion --auto-sync on --cadence 1440
+divinci connectors disconnect notion
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)

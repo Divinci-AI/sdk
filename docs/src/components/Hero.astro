@@ -1,0 +1,985 @@
+---
+/**
+ * Hero — Starlight splash hero override.
+ *
+ * Renders a two-column hero:
+ *  - Left: title, tagline, action buttons (from page frontmatter via
+ *          Astro.locals.starlightRoute, NOT Astro.props — the Starlight Props
+ *          type is deprecated and Astro.props is empty in component overrides).
+ *  - Right: orbital ring + 3D WebGL RobotHero mascot (loaded client-side)
+ *
+ * The RobotHero React component is loaded client-side via `client:only`
+ * because it depends on Three.js (WebGL). Until it hydrates the slot shows
+ * the orbit ring (CSS-only) as visual interest.
+ */
+
+import RobotHero from "./RobotHero/RobotHero";
+
+// ── Read hero config from Starlight's route data ─────────────────────
+// NOTE: Hero component overrides do NOT receive Astro.props.title / .hero.
+// Data is on Astro.locals.starlightRoute.entry.data.hero (same pattern
+// used by Starlight's built-in Hero.astro).
+const entry = Astro.locals.starlightRoute?.entry;
+const pageTitle = entry?.data?.title ?? "";
+const heroConfig = entry?.data?.hero ?? {};
+const { title = pageTitle, tagline, actions = [] } = heroConfig;
+---
+
+<div class="sdk-hero">
+  <div class="sdk-hero-text">
+    <h1>{title}</h1>
+    {
+      tagline && (
+        <p class="sdk-hero-tagline">{tagline}</p>
+      )
+    }
+    {
+      actions.length > 0 && (
+        <div class="sdk-hero-actions">
+          {actions.map((action) => (
+            <a
+              href={action.link}
+              class={action.variant === "primary" ? "sdk-hero-btn primary" : "sdk-hero-btn secondary"}
+            >
+              {action.text}
+              {action.icon === "external" && <span class="sdk-hero-icon">↗</span>}
+            </a>
+          ))}
+        </div>
+      )
+    }
+  </div>
+  <div class="sdk-hero-visual" aria-hidden="true">
+    <!-- Orbital ring behind the robot (SVG flower pattern) -->
+    <svg class="sdk-orbit-ring" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <g stroke="var(--sl-color-accent)" stroke-width="1.5" opacity="0.35">
+        <circle cx="200" cy="200" r="70"  data-hue="270"/>
+        <circle cx="200" cy="130" r="70"  data-hue="217"/>
+        <circle cx="260.6" cy="165" r="70" data-hue="200"/>
+        <circle cx="260.6" cy="235" r="70" data-hue="330"/>
+        <circle cx="200" cy="270" r="70"  data-hue="239"/>
+        <circle cx="139.4" cy="235" r="70" data-hue="220"/>
+        <circle cx="139.4" cy="165" r="70" data-hue="0"/>
+        <circle cx="200" cy="200" r="140" data-hue="260" data-outer="true"/>
+      </g>
+    </svg>
+    <!-- Soft radial scrim so the orbit lines fade behind the robot silhouette -->
+    <div class="sdk-orbit-scrim" aria-hidden="true"></div>
+    <!-- Robot hero in the center of the orbit -->
+    <div class="sdk-orbit-center">
+      <RobotHero client:only="react" />
+    </div>
+    <!-- Message-courier overlay (glowing chat bubbles riding the orbit arcs) -->
+    <canvas id="sdk-circuit-board" aria-hidden="true"></canvas>
+    <!-- Emoji satellites orbiting around -->
+    <div class="sdk-orbit-satellite o1">👴</div>
+    <div class="sdk-orbit-satellite o2">🤖</div>
+    <div class="sdk-orbit-satellite o3">🧑🏽‍🦱</div>
+    <div class="sdk-orbit-satellite o4">🤖</div>
+    <div class="sdk-orbit-satellite o5">👨🏻</div>
+    <div class="sdk-orbit-satellite o6">🤠</div>
+  </div>
+</div>
+
+<style is:global>
+  /* ── Two-column hero layout ───────────────────────────────────── */
+  .sdk-hero {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    /* The satellites orbit ~150px BELOW the visual box (and the speech
+       bubbles a little further), so a 2rem tail let them swing over the
+       first section's heading and paragraph. The extra bottom padding is
+       not dead space — it is the room the orbit is already using. Reset on
+       mobile, where `overflow: hidden` clips the bleed anyway. */
+    padding-block: 2rem 12rem;
+    max-width: var(--sl-content-width);
+    margin-inline: auto;
+    overflow: visible;       /* don't clip the orbit bleed */
+    position: relative;
+    /* NO z-index here. A positive z-index made this a stacking context that
+       painted the whole hero — orbit ring, satellites, speech bubbles — in a
+       positioned group ABOVE the non-positioned prose that follows, so the
+       decoration landed on top of the "Bring your coding agent" paragraph.
+       With `auto`, the negative z-index on .sdk-hero-visual below can escape
+       to the nearest real stacking context (.page) and sit behind the text. */
+  }
+  .sdk-hero-text {
+    flex: 1 1 25%;
+    min-width: 0;
+  }
+  .sdk-hero-text h1 {
+    font-size: clamp(2rem, 5vw, 3.25rem);
+    line-height: 1.15;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.5rem;
+    background: linear-gradient(135deg, var(--sl-color-white), var(--sl-color-accent-high));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .sdk-hero-tagline {
+    font-size: clamp(1rem, 2vw, 1.2rem);
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+    margin: 0 0 1.5rem;
+    max-width: 36rem;
+  }
+  .sdk-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .sdk-hero-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    padding: 0.7rem 1.5rem;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-decoration: none;
+    transition: box-shadow 0.2s, transform 0.15s;
+  }
+  .sdk-hero-btn.primary {
+    background: var(--sl-color-accent);
+    color: #fff;
+    box-shadow: 0 0 20px rgba(79, 70, 229, 0.35);
+  }
+  .sdk-hero-btn.primary:hover {
+    box-shadow: 0 0 30px rgba(79, 70, 229, 0.55);
+    transform: translateY(-1px);
+  }
+  .sdk-hero-btn.secondary {
+    border: 1px solid var(--sl-color-gray-4);
+    color: var(--sl-color-gray-2);
+  }
+  .sdk-hero-btn.secondary:hover {
+    border-color: var(--sl-color-accent);
+    color: var(--sl-color-accent-high);
+    transform: translateY(-1px);
+  }
+  .sdk-hero-icon {
+    font-size: 0.85em;
+  }
+  /* ── Visual column — orbit ring + robot ────────────────────────── */
+  .sdk-hero-visual {
+    flex: 0 0 min(420px, 50vw);
+    aspect-ratio: 1 / 1;
+    position: relative;
+    /* Behind page content. The ring (260%) and satellites bleed ~340px past
+       this box on every side and overlap the section below; a negative
+       z-index keeps that bleed but paints it beneath the prose. It still
+       paints ABOVE .page's own background — negative-z descendants sit
+       between a stacking context's background and its in-flow children — so
+       nothing disappears under the cream fill in light mode. */
+    z-index: -1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;       /* allow orbit ring + satellites to overflow */
+    container-type: inline-size; /* enable cqi units for satellite orbit radii */
+    /* Purely decorative (aria-hidden): the ring/canvas/satellites overflow
+       well beyond this box and would otherwise intercept hovers/clicks on the
+       cards below (e.g. the "Server SDK" card). Nothing inside needs pointer
+       events — the robot tracks the cursor via a window listener, not the DOM. */
+    pointer-events: none;
+  }
+
+  /* Orbit ring SVG sits behind everything */
+  .sdk-orbit-ring {
+    position: absolute;
+    z-index: 0;
+    /* Enlarged to cover ~75% of hero width and bleed into adjacent sections */
+    top: -80%;
+    left: -80%;
+    width: 260%;
+    height: 260%;
+    animation: sdk-orbit-ring-rotate 40s linear infinite;
+  }
+  @keyframes sdk-orbit-ring-rotate {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Radial scrim — dims/fades the orbit lines directly behind the robot so
+     they don't intersect harshly against his silhouette. Sits above the ring
+     (z 0) but below the robot (z 2). */
+  .sdk-orbit-scrim {
+    position: absolute;
+    z-index: 1;
+    top: 50%;
+    left: 50%;
+    width: 74%;
+    height: 74%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(circle at center,
+      rgba(13, 27, 42, 0.99) 0%,
+      rgba(13, 27, 42, 0.97) 40%,
+      rgba(20, 30, 48, 0.74) 60%,
+      rgba(20, 30, 48, 0) 80%);
+  }
+
+  /* Center content (RobotHero) — 55% → 61% = ~11% scale up */
+  .sdk-orbit-center {
+    position: relative;
+    z-index: 2;
+    width: 61%;
+    height: 61%;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, rgba(79, 70, 229, 0.2) 0%, transparent 60%);
+  }
+
+  /* ── Message-courier overlay canvas ───────────────────────────────
+     Layered BELOW the robot (z 1 < center z 2) and below the satellites
+     (z 3) / bubbles (z 20), but above the scrim (z 1, earlier in DOM): so
+     messages travel BEHIND the robot AND behind the emojis — emerging from
+     behind Divinci and flowing out to each face — never drawn on top of them.
+
+     Sized to 240% of the visual and centered: the satellites orbit at ~79% of
+     the visual width from center (well OUTSIDE the visual box), so a canvas
+     clamped to the box would clip every message just before it reaches an
+     emoji. 240% (≈1.2× the orbit radius) gives margin for the glyphs too. */
+  #sdk-circuit-board {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 240%;
+    height: 240%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* ── Satellite orbit animation ────────────────────────────────── */
+  .sdk-orbit-satellite {
+    position: absolute;
+    z-index: 3;
+    width: 5rem;
+    height: 5rem;
+    font-size: 3.5rem;
+    line-height: 5rem;
+    text-align: center;
+    top: 50%;
+    left: 50%;
+    margin: -2.5rem 0 0 -2.5rem;
+    /* Match the ring's 40s rotation so satellites stay aligned with the
+       sacred geometry lines as they orbit */
+    animation: sdk-orbit-spin 40s linear infinite;
+    transform-origin: 0 0;
+    /* Orbit radius in the transform — each satellite at a slightly
+       different radius for visual depth */
+  }
+
+  /* cqi = percentage of container inline-size (the .sdk-hero-visual width).
+     Ring edge from center = 140 * (2.6 * W / 400) ≈ 91% of container. */
+  /* Delays spaced evenly across the 40s orbit (72° apart = 8s intervals) */
+  .sdk-orbit-satellite.o1 { --orbit-radius: 79cqi;  --orbit-delay: 0s; }
+  .sdk-orbit-satellite.o2 { --orbit-radius: 79cqi;  --orbit-delay: -6.67s; }
+  .sdk-orbit-satellite.o3 { --orbit-radius: 79cqi; --orbit-delay: -13.33s; }
+  .sdk-orbit-satellite.o4 { --orbit-radius: 79cqi;  --orbit-delay: -20s; }
+  .sdk-orbit-satellite.o5 { --orbit-radius: 79cqi;  --orbit-delay: -26.67s; }
+  .sdk-orbit-satellite.o6 { --orbit-radius: 79cqi;  --orbit-delay: -33.33s; }
+
+  @keyframes sdk-orbit-spin {
+    0%   { transform: rotate(0deg)    translateX(var(--orbit-radius, 100%)) rotate(0deg); }
+    100% { transform: rotate(360deg)  translateX(var(--orbit-radius, 100%)) rotate(-360deg); }
+  }
+
+  .sdk-orbit-satellite {
+    animation-delay: var(--orbit-delay, 0s);
+  }
+
+  /* ── Reduced motion: freeze autonomous animation ──────────────────
+     The orbit ring stops; satellites stay spread out (paused at their
+     staggered delay frame instead of collapsing to the origin); the
+     speech-bubble pop is removed. The courier + fractal + disc loops are
+     gated in their own scripts. */
+  @media (prefers-reduced-motion: reduce) {
+    .sdk-orbit-ring { animation: none; }
+    .sdk-orbit-satellite { animation-play-state: paused; }
+    .sdk-chat-bubble { animation: none !important; }
+  }
+
+  @media (max-width: 50rem) {
+    .sdk-hero {
+      flex-direction: column-reverse;
+      text-align: center;
+      overflow: hidden;       /* clip orbit bleed on mobile to avoid scroll issues */
+      /* Top clearance for the speech bubbles, and nothing more. A satellite at
+         the top of its orbit sits 0.02·V above the visual box and its bubble
+         another 32px above that (half the emoji + the bubble's -6px offset),
+         so the bubble's top lands at `padding-top − 0.02·V − 32` inside the
+         hero — and the hero clips at its own edge. 3rem leaves ~9px at every
+         width up to the breakpoint; 2rem clipped it (the "Affirmative, elde…"
+         cut-off). Do not trim further without redoing that sum.
+         Bottom stays 2rem: the bleed is clipped here. */
+      padding-block: 3rem 2rem;
+    }
+
+    /* ── Reclaim the dead space above the hero ────────────────────────────
+       Starlight assumes a FIXED header and gives .main-frame a
+       `padding-top: var(--sl-nav-height)` to clear it. This site overrides the
+       header to `position: relative` (styles/custom.css — it needs to sit in
+       the glassmorphism stacking order), so the header already occupies its
+       own height in normal flow and that offset is pure duplicate space:
+       ~80px of nothing between the header and the animation.
+
+       Scoped to [data-has-hero] (Starlight sets it on <html> for splash pages
+       only) so ordinary doc pages keep Starlight's spacing above their H1. */
+    :root[data-has-hero] .main-frame {
+      padding-top: 0;
+    }
+    :root[data-has-hero] .content-panel {
+      padding-top: 1rem;
+    }
+    .sdk-hero-actions {
+      justify-content: center;
+    }
+    .sdk-hero-tagline {
+      margin-inline: auto;
+    }
+    .sdk-hero-visual {
+      /* It reads as a background animation, so it earns the width. 60vw left a
+         wide dead gutter on both sides; 76vw fills it. The cap rises with it so
+         the growth continues up to the breakpoint instead of pinning at 300px.
+         Paired with the smaller orbit radius below — see that rule for the
+         arithmetic that keeps the satellites on screen. */
+      flex-basis: min(340px, 76vw);
+    }
+    /* RobotHero dollies its camera back on this breakpoint so arm swings and
+       antenna wobble stay inside the canvas; that renders the robot ~15%
+       smaller. Widen his slot by the same amount so he keeps his apparent
+       size — the extra width is frame headroom, not a bigger robot. */
+    .sdk-orbit-center {
+      width: 72%;
+      height: 72%;
+    }
+    /* Reduce orbit overflow on mobile so it doesn't escape the viewport */
+    .sdk-orbit-ring {
+      top: -40%;
+      left: -40%;
+      width: 180%;
+      height: 180%;
+    }
+    /* Ring is 180% of container on mobile: edge = 140*1.8/400 ≈ 63cqi */
+    .sdk-orbit-satellite {
+      width: 3.25rem;
+      height: 3.25rem;
+      font-size: 2.25rem;
+      line-height: 3.25rem;
+      margin: -1.625rem 0 0 -1.625rem;
+    }
+    /* 55cqi → 52cqi. The visual grew to 76vw, so the orbit has to tighten
+       relative to it or the satellites leave the viewport and `overflow:
+       hidden` shears them off. The binding constraint is the widest satellite
+       excursion against the viewport half-width:
+         0.52 · V + 26px (half an emoji) ≤ W/2
+       At the narrow end (W=320 → V=243) that is 152 ≤ 160; at W=430 it is
+       196 ≤ 215. Everything in between clears. Raising either this radius or
+       the 76vw above without redoing that sum will clip the emoji. */
+    .sdk-orbit-satellite.o1 { --orbit-radius: 52cqi; }
+    .sdk-orbit-satellite.o2 { --orbit-radius: 52cqi; }
+    .sdk-orbit-satellite.o3 { --orbit-radius: 52cqi; }
+    .sdk-orbit-satellite.o4 { --orbit-radius: 52cqi; }
+    .sdk-orbit-satellite.o5 { --orbit-radius: 52cqi; }
+    .sdk-orbit-satellite.o6 { --orbit-radius: 52cqi; }
+  }
+</style>
+
+<script>
+// ── Hero animation gate ─────────────────────────────────────────────
+// Every splash-hero loop (disc fills, arc courier, conversation, and the WebGL
+// robot) animates ONLY when the hero is actually worth animating:
+//   active = on-screen  AND  tab visible  AND  not idle (no input for 30s)
+// Loops read `heroVisible` and self-terminate when it's false; on re-entry the
+// registered resume hooks restart whatever stopped. The robot island (a
+// separate React tree) syncs via the `divinci:hero-active` event + the
+// `window.__divinciHeroActive` global.
+let heroVisible = true;
+const heroResumeHooks = [];
+(function () {
+  const target = document.querySelector(".sdk-hero-visual");
+  let onScreen = true;
+  let pageVisible = !document.hidden;
+  let idle = false;
+  const IDLE_MS = 30000;
+  let idleTimer = 0;
+
+  function recompute() {
+    const active = onScreen && pageVisible && !idle;
+    if (active === heroVisible) return;
+    heroVisible = active;
+    window.__divinciHeroActive = active;
+    window.dispatchEvent(new CustomEvent("divinci:hero-active", { detail: { active } }));
+    if (active) heroResumeHooks.forEach((fn) => fn());
+  }
+
+  // Reset the idle countdown on any interaction; pause the hero after 30s of
+  // none. (Cheap: only recompute()s when the idle state actually flips.)
+  function armIdle() {
+    clearTimeout(idleTimer);
+    if (idle) { idle = false; recompute(); }
+    idleTimer = window.setTimeout(() => { idle = true; recompute(); }, IDLE_MS);
+  }
+
+  if (target && typeof IntersectionObserver !== "undefined") {
+    new IntersectionObserver((entries) => {
+      onScreen = entries.some((e) => e.isIntersecting);
+      recompute();
+    }, { threshold: 0 }).observe(target);
+  }
+  document.addEventListener("visibilitychange", () => {
+    pageVisible = !document.hidden;
+    recompute();
+  });
+  ["mousemove", "pointerdown", "keydown", "wheel", "touchstart", "scroll"].forEach((ev) =>
+    window.addEventListener(ev, armIdle, { passive: true })
+  );
+  window.__divinciHeroActive = true;
+  armIdle();
+})();
+
+// ── "Ask Divinci" launcher gate ─────────────────────────────────────
+// The splash hero is already busy — orbiting emoji, speech bubbles, two CTAs —
+// and the launcher pill lands right on top of the buttons. Hold it back until
+// the visitor has scrolled past half the hero, then let it fade in.
+//
+// The flag is an attribute on <html> rather than a style set on the widget:
+// the widget mounts asynchronously (and re-mounts on Starlight view
+// transitions), so there may be no launcher in the DOM when this runs. CSS in
+// DocsAssistant.astro reads the attribute and applies whenever the pill
+// appears. This script exists only on pages WITH a hero, so every other page
+// leaves the attribute unset and the launcher behaves normally.
+(function () {
+  const hero = document.querySelector(".sdk-hero");
+  if (!hero) return;
+  const root = document.documentElement;
+  const REVEAL_FRACTION = 0.5;
+  let ticking = false;
+  let shown = null;
+
+  function apply() {
+    ticking = false;
+    const r = hero.getBoundingClientRect();
+    // How much of the hero has passed above the viewport top. Guard the
+    // divide: a display:none hero (height 0) should not gate the launcher.
+    const past = r.height > 0 ? -r.top / r.height : 1;
+    const next = past >= REVEAL_FRACTION;
+    if (next === shown) return;
+    shown = next;
+    root.dataset.heroLauncher = next ? "shown" : "hidden";
+  }
+  function onScroll() {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(apply);
+  }
+
+  apply();
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
+  // Starlight swaps the document on client-side navigation; a page without a
+  // hero must not inherit "hidden" and lose its launcher for good.
+  document.addEventListener("astro:before-swap", function () {
+    delete root.dataset.heroLauncher;
+  });
+})();
+
+/**
+ * Animated disc fills — very subtle, matching the fractal background
+ * transparency.  Each circle gets a deterministic base hue from its
+ * data-hue attribute; fills drift slowly through HSL space so they
+ * never look static.
+ */
+(function(){
+  const ring = document.querySelector(".sdk-orbit-ring");
+  if (!ring) return;
+  const circles = ring.querySelectorAll("circle");
+  if (!circles.length) return;
+
+  const reduce = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function mulberry32(a) {
+    return function() {
+      a |= 0; a = a + 0x6D2B79F5 | 0;
+      var t = Math.imul(a ^ a >>> 15, 1 | a);
+      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+      return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+  }
+
+  const offsets = [];
+  for (let i = 0; i < circles.length; i++) {
+    const rng = mulberry32(i * 137 + 42);
+    offsets.push({
+      huePhase: rng() * 360,
+      satShift: (rng() - 0.5) * 30,
+      lightShift: (rng() - 0.5) * 20,
+      speed: 0.15 + rng() * 0.35,
+    });
+  }
+
+  let startTime = null;
+  let discRunning = false;
+  let discLastDraw = -Infinity;
+  // The hue drift is barely perceptible (alpha ≤ 0.06) — 12fps is plenty, and
+  // each frame mutates inline SVG fills (a repaint), so throttling matters.
+  const DISC_FRAME_MS = 1000 / 12;
+
+  function paintDiscs(ts) {
+    if (startTime === null) startTime = ts;
+    const elapsed = (ts - startTime) / 1000;
+
+    for (let i = 0; i < circles.length; i++) {
+      const c = circles[i];
+      const baseHue = parseFloat(c.getAttribute("data-hue")) || 270;
+      const o = offsets[i];
+
+      const hue = (baseHue + elapsed * o.speed + o.huePhase) % 360;
+      const sat = 55 + o.satShift + 10 * Math.sin(elapsed * 0.02 + i);
+      const lit = 35 + o.lightShift + 8 * Math.sin(elapsed * 0.015 + i * 1.7);
+      // Very subtle — inner circles at 0.06, outer at 0.02
+      const alpha = c.hasAttribute("data-outer") ? 0.02 : 0.06;
+
+      c.style.fill = `hsla(${hue}, ${sat}%, ${lit}%, ${alpha})`;
+    }
+  }
+
+  function animateDiscs(ts) {
+    if (ts - discLastDraw >= DISC_FRAME_MS) {
+      discLastDraw = ts;
+      paintDiscs(ts);
+    }
+    if (!reduce && heroVisible) requestAnimationFrame(animateDiscs);
+    else discRunning = false;
+  }
+  function kickDiscs() {
+    if (discRunning) return;
+    discRunning = true;
+    requestAnimationFrame(animateDiscs);
+  }
+
+  if (reduce) {
+    // Reduced motion: paint one static frame, never loop.
+    paintDiscs(performance.now());
+  } else {
+    kickDiscs();
+    heroResumeHooks.push(kickDiscs);
+  }
+})();
+
+/**
+ * Conversation + arc courier.
+ *
+ * The six orbiting emoji characters (and the Divinci robot in the center) hold
+ * a single, progressing conversation about building with the Divinci SDK — one
+ * speaker at a time (never all at once). When someone speaks, a glowing
+ * "message bubble" travels FROM the speaker TO whoever they're replying to,
+ * riding along the circular orbit arc the emojis already sit on (emoji↔emoji)
+ * or gliding radially in/out for the robot at the center. The arc lights up
+ * with a transferring glow as the message courier passes over it.
+ *
+ * The robot (RobotHero React island) reads window.__divinciHeroSpeaker — the
+ * satellite index he should look at — so his gaze follows the dialogue.
+ */
+(function(){
+  const visual = document.querySelector(".sdk-hero-visual");
+  const canvas = document.getElementById("sdk-circuit-board");
+  const satellites = document.querySelectorAll(".sdk-orbit-satellite");
+  if (!visual || !satellites.length) return;
+
+  const reduce = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // ── Scripted, progressing SDK conversation ──────────────────────────
+  // speaker / to are satellite indices (0=👴 1=🤖 2=🧑🏽‍🦱 3=🤖 4=👨🏻 5=🤠)
+  // or the string "robot" (the Divinci mascot in the center). Each line replies
+  // to the previous speaker, so the dialogue actually progresses.
+  const ROBOT = "robot";
+  const SCRIPT = [
+    { speaker: 4,     to: ROBOT, text: "Divinci, I want to add AI chat to my app today." },
+    { speaker: ROBOT, to: 4,     text: "Easy — `npm i @divinci-ai/client` and you've got a chat client." },
+    { speaker: 2,     to: 4,     text: "Then `new DivinciClient({ apiKey })`. That's the whole setup." },
+    { speaker: 1,     to: 2,     text: "Initializing… `.chat()` is streaming tokens already." },
+    { speaker: 0,     to: 1,     text: "We hand-rolled SSE for years. You just call `.chat()`?" },
+    { speaker: 1,     to: 0,     text: "Affirmative, elder. Streaming is built in." },
+    { speaker: 5,     to: ROBOT, text: "But I got a whole barn of PDFs. Can you read 'em?" },
+    { speaker: ROBOT, to: 5,     text: "Upload them to a RAG vector — I'll answer from your docs." },
+    { speaker: 2,     to: 5,     text: "Server SDK does the embedding: `rag.upload(file)`." },
+    { speaker: ROBOT, to: 5,     text: "And I cite the source doc on every answer. No made-up barns." },
+    { speaker: 4,     to: ROBOT, text: "Can folks pay me through the chat?" },
+    { speaker: 3,     to: 4,     text: "x402 + MCP payments — charge per tool call." },
+    { speaker: 0,     to: 3,     text: "Money over a chat message? The old ways are truly dead." },
+    { speaker: 5,     to: ROBOT, text: "Then let's ship it — `divinci deploy`!" },
+    { speaker: ROBOT, to: 5,     text: "Deploying… live. Chat, RAG, payments — all typed. 💜" },
+    { speaker: 2,     to: ROBOT, text: "Wait… I've got another idea." },
+  ];
+
+  // ===================================================================
+  // Courier — a glowing message that rides the orbit arc speaker→recipient
+  // ===================================================================
+  let ctx = null;
+  let dpr = 1;
+  let messages = [];
+  let courierRunning = false;
+  // Satellite/center positions snapshotted once per frame so a message's
+  // pathPoint()/strokePath() don't each re-query getBoundingClientRect().
+  let posCache = null;
+  if (canvas && !reduce) ctx = canvas.getContext("2d");
+
+  function resize() {
+    if (!ctx) return;
+    // Cap DPR at 1.5 (the enlarged canvas is large; the glow hides softness).
+    // Size the backing store to the canvas's OWN rendered rect (240% of the
+    // visual) — CSS owns the element size, so we don't touch style here.
+    dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+  }
+  if (ctx) {
+    resize();
+    let rt;
+    window.addEventListener("resize", function(){ clearTimeout(rt); rt = setTimeout(resize, 150); });
+  }
+
+  // Center of the canvas (= robot center) in device px.
+  function canvasCenter() {
+    return { x: canvas.width / 2, y: canvas.height / 2 };
+  }
+  // Live center of a participant in canvas device px. "robot" → center.
+  function liveNodePos(which) {
+    if (which === ROBOT) return canvasCenter();
+    const el = satellites[which];
+    if (!el) return canvasCenter();
+    const cr = canvas.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      x: (r.left - cr.left + r.width / 2) * dpr,
+      y: (r.top - cr.top + r.height / 2) * dpr,
+    };
+  }
+  // Snapshot every participant's position once per frame.
+  function buildPosCache() {
+    const sats = [];
+    for (let i = 0; i < satellites.length; i++) sats[i] = liveNodePos(i);
+    posCache = { center: canvasCenter(), sats };
+  }
+  function nodePos(which) {
+    if (!posCache) return liveNodePos(which);
+    if (which === ROBOT) return posCache.center;
+    return posCache.sats[which] || posCache.center;
+  }
+
+  function send(from, to) {
+    if (!ctx || !heroVisible) return;
+    messages.push({ from, to, start: performance.now(), dur: 1500 });
+    kickCourier();
+  }
+  function kickCourier() {
+    if (courierRunning || !ctx) return;
+    courierRunning = true;
+    requestAnimationFrame(frame);
+  }
+
+  // Shortest signed angular delta from a to b (radians, −π…π).
+  function angDelta(a, b) {
+    let d = (b - a) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+
+  // Resolve a message to ONE circular-arc descriptor {cx, cy, r, a0, delta} in
+  // canvas px. Every message rides a curved line:
+  //  - emoji↔emoji → concentric arc on the shared orbit ring (center = C).
+  //  - robot↔emoji → the flower-of-life petal: the circle whose DIAMETER is the
+  //    center↔emoji segment passes through both the robot (center) and the
+  //    emoji, and its outward semicircle is exactly the curved petal line. So
+  //    the message follows that curve instead of shooting straight.
+  function pathFor(m) {
+    const C = canvasCenter();
+    const a = nodePos(m.from);
+    const b = nodePos(m.to);
+    if (m.from === ROBOT || m.to === ROBOT) {
+      const M = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      const r = Math.hypot(b.x - a.x, b.y - a.y) / 2;
+      const a0 = Math.atan2(a.y - M.y, a.x - M.x);
+      // Of the two semicircles (±π), ride the one bowing farther from center.
+      const midDist = (delta) => {
+        const ang = a0 + delta / 2;
+        return Math.hypot(M.x + Math.cos(ang) * r - C.x, M.y + Math.sin(ang) * r - C.y);
+      };
+      const delta = midDist(Math.PI) >= midDist(-Math.PI) ? Math.PI : -Math.PI;
+      return { cx: M.x, cy: M.y, r, a0, delta };
+    }
+    const ra = Math.hypot(a.x - C.x, a.y - C.y);
+    const rb = Math.hypot(b.x - C.x, b.y - C.y);
+    const r = (ra + rb) / 2;
+    const a0 = Math.atan2(a.y - C.y, a.x - C.x);
+    const delta = angDelta(a0, Math.atan2(b.y - C.y, b.x - C.x));
+    return { cx: C.x, cy: C.y, r, a0, delta };
+  }
+
+  // Point along an arc descriptor at progress p (0..1).
+  function arcPoint(desc, p) {
+    const ang = desc.a0 + desc.delta * p;
+    return { x: desc.cx + Math.cos(ang) * desc.r, y: desc.cy + Math.sin(ang) * desc.r };
+  }
+
+  // Stroke an arc descriptor between two progress values (faint trace / trail).
+  function strokeArc(desc, p0, p1, alpha, width) {
+    ctx.beginPath();
+    ctx.arc(desc.cx, desc.cy, desc.r, desc.a0 + desc.delta * p0, desc.a0 + desc.delta * p1, desc.delta < 0);
+    ctx.strokeStyle = `rgba(120, 200, 255, ${alpha})`;
+    ctx.lineWidth = width * dpr;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  function frame(now) {
+    if (!ctx) return;
+    // Scrolled out of view → clear, drop in-flight messages, stop the loop.
+    if (!heroVisible) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      messages = [];
+      posCache = null;
+      courierRunning = false;
+      return;
+    }
+    try {
+      buildPosCache();
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      messages = messages.filter(function(m){
+        const raw = (now - m.start) / m.dur;
+        if (raw >= 1.25) return false;          // keep briefly past arrival to fade
+        const p = Math.min(1, raw);
+        const fade = raw > 1 ? Math.max(0, 1 - (raw - 1) / 0.25) : 1;
+
+        const desc = pathFor(m);
+        ctx.save();
+        ctx.shadowColor = "rgba(0, 230, 255, 0.7)";
+        ctx.shadowBlur = 10 * dpr;
+        // Faint full arc the message rides along
+        strokeArc(desc, 0, 1, 0.10 * fade, 1.2);
+        // Bright comet trail just behind the head (the "transferring glow")
+        strokeArc(desc, Math.max(0, p - 0.18), p, 0.5 * fade, 2.4);
+        ctx.restore();
+
+        // Traveling message bubble (glowing circle) at the head
+        const head = arcPoint(desc, p);
+        ctx.save();
+        ctx.shadowColor = "rgba(0, 230, 255, 0.95)";
+        ctx.shadowBlur = 22 * dpr;
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, 7 * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(0, 230, 255, ${0.28 * fade})`;
+        ctx.fill();
+        ctx.shadowBlur = 12 * dpr;
+        ctx.beginPath();
+        ctx.arc(head.x, head.y, 3.5 * dpr, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(190, 245, 255, ${0.95 * fade})`;
+        ctx.fill();
+        ctx.restore();
+        return true;
+      });
+    } catch (e) {
+      console.warn("[ArcCourier] frame error (loop continues):", e);
+    }
+    posCache = null;
+    // Idle (no messages in flight) → stop until the next send() re-kicks us.
+    if (messages.length > 0) requestAnimationFrame(frame);
+    else courierRunning = false;
+  }
+
+  // ===================================================================
+  // Speech bubbles — one at a time, driving the courier + the robot gaze
+  // ===================================================================
+  let currentBubble = null;
+  let turn = 0;
+  let conversationPaused = false;
+
+  function clearBubble() {
+    if (currentBubble && currentBubble.parentNode) currentBubble.remove();
+    currentBubble = null;
+  }
+
+  function showBubble(item) {
+    const el = document.createElement("div");
+    el.className = "sdk-chat-bubble";
+    el.textContent = item.text;
+    el.style.position = "absolute";
+    el.style.zIndex = "20";
+    el.style.whiteSpace = "nowrap";
+    if (!reduce) el.style.animation = "sdk-chat-pop 0.4s ease forwards";
+
+    if (item.speaker === ROBOT) {
+      // Robot's own bubble — centered just above the mascot.
+      el.dataset.pos = "top";
+      el.style.left = "50%";
+      el.style.top = "14%";
+      el.style.transform = "translateX(-50%)";
+      visual.appendChild(el);
+    } else {
+      const sat = satellites[item.speaker];
+      // Open the bubble INWARD (toward center). On the outward side, a bubble on
+      // a far-orbit satellite would extend past the viewport edge and create a
+      // horizontal scrollbar.
+      const vr = visual.getBoundingClientRect();
+      const sr = sat.getBoundingClientRect();
+      const onRight = (sr.left + sr.width / 2) >= (vr.left + vr.width / 2);
+      el.dataset.pos = onRight ? "left" : "right";
+      el.style.top = "-6px";
+      if (onRight) el.style.right = "calc(100% + 10px)";
+      else el.style.left = "calc(100% + 10px)";
+      sat.appendChild(el);
+    }
+    currentBubble = el;
+  }
+
+  function runTurn() {
+    // Off-screen → pause the dialogue (and its bubble/courier churn) until the
+    // hero scrolls back into view.
+    if (!heroVisible) { conversationPaused = true; return; }
+    const item = SCRIPT[turn % SCRIPT.length];
+    turn++;
+
+    // The robot looks at the emoji in play: the speaker when an emoji talks,
+    // otherwise (robot's own turn) whoever he is replying to.
+    const gazeIdx = item.speaker === ROBOT
+      ? (typeof item.to === "number" ? item.to : null)
+      : item.speaker;
+    window.__divinciHeroSpeaker = gazeIdx;
+
+    send(item.speaker, item.to);
+    showBubble(item);
+
+    const readMs = Math.max(2600, Math.min(7000, item.text.length * 58));
+    setTimeout(function(){
+      clearBubble();
+      window.__divinciHeroSpeaker = null;
+      setTimeout(runTurn, 750);
+    }, readMs);
+  }
+
+  function resumeConversation() {
+    if (conversationPaused) {
+      conversationPaused = false;
+      runTurn();
+    }
+  }
+  heroResumeHooks.push(resumeConversation);
+
+  // Kick off after a short beat so the scene settles first.
+  setTimeout(runTurn, 1200);
+})();
+</script>
+<style is:global>
+  @keyframes sdk-chat-pop {
+    0%   { transform: scale(0) translateY(6px); opacity: 0; }
+    55%  { transform: scale(1.1) translateY(-2px); opacity: 1; }
+    100% { transform: scale(1) translateY(0); opacity: 1; }
+  }
+
+  /* Robot's centered bubble keeps its translateX while popping in. */
+  @keyframes sdk-chat-pop-center {
+    0%   { transform: translateX(-50%) scale(0) translateY(6px); opacity: 0; }
+    55%  { transform: translateX(-50%) scale(1.1) translateY(-2px); opacity: 1; }
+    100% { transform: translateX(-50%) scale(1) translateY(0); opacity: 1; }
+  }
+  .sdk-chat-bubble[data-pos="top"] {
+    animation-name: sdk-chat-pop-center !important;
+  }
+
+  /* ── White speech bubble (global — elements created dynamically) ── */
+  .sdk-chat-bubble {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    font-weight: 500;
+    color: #1a1a2e;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    border-radius: 14px;
+    padding: 4px 12px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+    max-width: min(260px, 35vw);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  /* ── Chevron triangle (two layers for a border outline) ────────── */
+
+  /* Outer triangle (white border outline) */
+  .sdk-chat-bubble::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 0;
+    height: 0;
+    border: 7px solid transparent;
+  }
+
+  /* Inner triangle (white fill, slightly offset) */
+  .sdk-chat-bubble::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    width: 0;
+    height: 0;
+    border: 6px solid transparent;
+  }
+
+  /* Bubble on the RIGHT of satellite → chevron points LEFT */
+  .sdk-chat-bubble[data-pos="right"]::before {
+    left: -14px;
+    margin-top: -7px;
+    border-right-color: rgba(255, 255, 255, 0.6);
+  }
+  .sdk-chat-bubble[data-pos="right"]::after {
+    left: -12px;
+    margin-top: -6px;
+    border-right-color: rgba(255, 255, 255, 0.92);
+  }
+
+  /* Bubble on the LEFT of satellite → chevron points RIGHT */
+  .sdk-chat-bubble[data-pos="left"]::before {
+    right: -14px;
+    margin-top: -7px;
+    border-left-color: rgba(255, 255, 255, 0.6);
+  }
+  .sdk-chat-bubble[data-pos="left"]::after {
+    right: -12px;
+    margin-top: -6px;
+    border-left-color: rgba(255, 255, 255, 0.92);
+  }
+
+  /* Robot's bubble sits ABOVE him → chevron points DOWN (centered) */
+  .sdk-chat-bubble[data-pos="top"]::before {
+    top: auto;
+    bottom: -14px;
+    left: 50%;
+    margin-left: -7px;
+    border-top-color: rgba(255, 255, 255, 0.6);
+  }
+  .sdk-chat-bubble[data-pos="top"]::after {
+    top: auto;
+    bottom: -12px;
+    left: 50%;
+    margin-left: -6px;
+    border-top-color: rgba(255, 255, 255, 0.92);
+  }
+
+  @media (max-width: 50rem) {
+    .sdk-chat-bubble {
+      font-size: 0.6rem;
+      padding: 3px 10px;
+      max-width: min(160px, 28vw);
+    }
+  }
+</style>

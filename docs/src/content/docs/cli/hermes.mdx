@@ -1,0 +1,166 @@
+---
+title: Hermes Agents
+description: Create, ground, chat with, and manage hosted Hermes agents from the terminal — divinci hermes create/list/get/update/chat/key/delete.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Manage [hosted Hermes agents](/server/hermes-agents/) — isolated
+NousResearch Hermes containers on Divinci infrastructure — without leaving your
+terminal. Every command supports the global `--json` flag for scripting and
+`--workspace <id>` to override the active workspace.
+
+## Create
+
+```bash
+# Platform model (Divinci-paid, no key needed) — the default
+divinci hermes create --title "Support Bot"
+
+# Pick a model explicitly
+divinci hermes create --title "Llama Bot" \
+  --model "cloudflare/@cf/meta/llama-3.3-70b-instruct-fp8-fast"
+
+# Bring your own key
+divinci hermes create --title "Claude Agent" \
+  --model "anthropic/claude-sonnet-4-5" \
+  --provider anthropic --provider-api-key "$ANTHROPIC_API_KEY"
+
+# Ground every turn in a Release's knowledge base (RAG)
+divinci hermes create --title "Docs Agent" --release <releaseId>
+```
+
+Also accepts `--system-prompt` (persona) and `--description`.
+
+## List and inspect
+
+```bash
+divinci hermes list
+
+divinci hermes get <agentId>
+# → model, status (provisioned | active | stopped), linked releaseId,
+#   BYOK provider + hasProviderApiKey, and the hsk- proxy key
+```
+
+## Update
+
+Partial update — only the flags you pass are touched:
+
+```bash
+divinci hermes update <agentId> --model "vertex_ai/gemini-2.5-pro"
+divinci hermes update <agentId> --system-prompt "New persona"
+divinci hermes update <agentId> --disable        # reject chat with 403
+divinci hermes update <agentId> --enable
+
+# RAG grounding
+divinci hermes update <agentId> --release <releaseId>
+divinci hermes update <agentId> --clear-release
+
+# BYOK key rotation (encrypted server-side, never echoed back)
+divinci hermes update <agentId> --provider anthropic --provider-api-key "$NEW_KEY"
+divinci hermes update <agentId> --clear-provider-key   # revert to platform billing
+```
+
+## Chat
+
+```bash
+divinci hermes chat <agentId> "Summarize our refund policy."
+```
+
+Prints the agent's reply. Each successful turn is metered to the workspace
+wallet.
+
+<Aside type="note" title="Cold starts are handled for you">
+  A sleeping container cold-boots on the first turn (typically 30–60s). If the
+  API returns <code>503 agent_warming</code>, the CLI waits ~30 seconds and
+  retries once automatically — you'll see an "Agent is cold-starting" spinner.
+</Aside>
+
+## Proxy key
+
+```bash
+divinci hermes key <agentId>            # print the hsk- key + connection hint
+divinci hermes key <agentId> --rotate   # mint a new key, revoking the old one
+```
+
+Drop the key into any OpenAI-compatible client:
+
+```bash
+export OPENAI_BASE_URL="https://api.divinci.app/api/v1/hermes-proxy"
+export OPENAI_API_KEY="hsk-your-agent-proxy-key"
+```
+
+## Delete
+
+```bash
+divinci hermes delete <agentId>   # stops the container and removes the record
+```
+
+## Proactive wake loop
+
+An agent can wake on its own, decide whether it has anything worth saying, and
+either record it (`shadow`) or post it to its Slack home channel (`live`).
+
+```bash
+# Read the current config and recent wakes (no flags = read-only)
+divinci hermes proactive <agentId>
+
+# Wake once a day at 09:00 Pacific, recording only
+divinci hermes proactive <agentId> --enable --at 09:00 --tz America/Los_Angeles
+
+# Wake every 3 hours instead
+divinci hermes proactive <agentId> --every 3
+
+# Back to once a day
+divinci hermes proactive <agentId> --every daily
+```
+
+| Flag | Meaning |
+|------|---------|
+| `--enable` / `--disable` | Master switch. Off by default — an agent never ticks unless asked. |
+| `--mode shadow\|live` | `shadow` runs the turn and records it, posting nothing. `live` also posts. Defaults to `shadow`. |
+| `--at HH:MM` + `--tz <zone>` | Wake time in the agent's own timezone. Required together. With `--every`, this anchors the **first** wake. |
+| `--every <hours>` | Wake every N hours (1-24) instead of once a day. `daily` restores once a day. |
+| `--goal <text>` | **Appends** a goal (repeatable). Use `--clear-goals` to replace. |
+| `--memory <text>` | Appends a memory (repeatable). Author-written only. |
+| `--slack` / `--no-slack`, `--email`, `--sms` | Where a `live` message goes. |
+| `--runs [n]` | Show the N most recent wakes. |
+
+<Aside type="caution" title="`--every` multiplies what the agent costs">
+  Every wake is **one billed turn** against the workspace wallet — including the
+  ticks that decide to stay silent, because the thinking still happened.
+
+  `--every 3` is **8 turns a day, not 1**. `--every 1` is 24.
+
+  In `live` mode it also multiplies interruptions, against a practical ceiling of
+  3-5 unsolicited messages per day across *all* channels combined — Slack, email
+  and SMS share one budget, they do not each get their own. Short intervals
+  belong in `shadow` mode, or on a loop watching something that genuinely changes
+  that often.
+
+  Whole hours only. `--every 1.5` is rejected rather than rounded: silently
+  reinterpreting a schedule shows up later as an unexplained bill.
+</Aside>
+
+<Aside type="tip" title="A missed wake is missed, never backfilled">
+  Wakes are measured from the last run, not against a wall-clock grid. A day of
+  downtime produces **one** wake when service returns, not eight queued ones —
+  "catching up" on a reflection loop means posting eight stale messages at once.
+
+  It also means the cadence is immune to daylight saving. A local-hour grid
+  either drops or repeats a slot on the 23- and 25-hour days; elapsed time
+  cannot.
+</Aside>
+
+<Aside type="tip" title="Environments behind Cloudflare Access">
+  If your API host is fronted by Cloudflare Access (e.g. a staging
+  environment), give the CLI the service-token headers via
+  <code>DIVINCI_EXTRA_HEADERS</code>:
+
+  ```bash
+  export DIVINCI_EXTRA_HEADERS='{"CF-Access-Client-Id":"…","CF-Access-Client-Secret":"…"}'
+  ```
+
+  The headers are sent on every request in addition to your normal Divinci
+  auth. Malformed JSON is a hard error so a broken value can't silently turn
+  into an opaque edge 403.
+</Aside>

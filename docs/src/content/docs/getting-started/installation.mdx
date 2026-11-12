@@ -1,0 +1,93 @@
+---
+title: Installation
+description: Install the Divinci AI SDK packages
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+
+Install the SDK packages using your preferred package manager.
+
+## Client SDK
+
+For browser-based chat applications:
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install @divinci-ai/client
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @divinci-ai/client
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @divinci-ai/client
+    ```
+  </TabItem>
+</Tabs>
+
+## Server SDK
+
+For Node.js backend applications:
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install @divinci-ai/server
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @divinci-ai/server
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @divinci-ai/server
+    ```
+  </TabItem>
+</Tabs>
+
+## MCP SDK
+
+For MCP protocol integrations:
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install @divinci-ai/mcp
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add @divinci-ai/mcp
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn add @divinci-ai/mcp
+    ```
+  </TabItem>
+</Tabs>
+
+## Requirements
+
+- **Node.js**: >= 18.0.0 (Server SDK)
+- **Browser**: Modern browsers with ES2020 support (Client SDK)
+- **TypeScript**: >= 5.0 (optional, but recommended)
+
+## TypeScript Support
+
+All packages include TypeScript definitions. The `@divinci-ai/types` package is automatically installed as a dependency and provides shared type definitions.
+
+```typescript
+import type { ChatMessage, ChatResponse } from "@divinci-ai/types";
+```
+
+## Next Steps
+
+Once installed, continue to [Quick Start](/getting-started/quickstart) to build your first integration.

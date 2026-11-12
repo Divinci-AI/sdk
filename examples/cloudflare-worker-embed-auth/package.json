@@ -1,0 +1,19 @@
+{
+  "name": "cloudflare-worker-embed-auth",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Divinci embed client on a Cloudflare Worker — auth example",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "jose": "^5.2.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241127.0",
+    "typescript": "^5.3.0",
+    "wrangler": "^4.76.0"
+  }
+}

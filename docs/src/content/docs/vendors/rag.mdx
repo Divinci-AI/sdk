@@ -1,0 +1,63 @@
+---
+title: RAG & Vector Stores
+description: The 14 vector stores Divinci can put a RAG corpus in — Cloudflare Vectorize, Turso, Pinecone, Qdrant, Redis, MongoDB Atlas, Vertex AI, Neo4j, Couchbase, PageIndex, RAPTOR and LightRAG.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import ToolCatalogTable from "../../../components/ToolCatalogTable.astro";
+
+A RAG vector's **store** is chosen when the vector is created and cannot be
+changed afterwards. It decides where chunks live, what a query costs, and — for
+the graph and tree stores — what "retrieval" even means.
+
+<ToolCatalogTable type="RAG/Vector" />
+
+## Three families, not one list
+
+The table above mixes three genuinely different things:
+
+**Plain vector stores** — Cloudflare Vectorize, Qdrant, Pinecone, Redis,
+MongoDB Atlas, Vertex AI Vector Search, Turso, Couchbase. Chunks in, nearest
+neighbours out. Pick on where your data is allowed to live and whose bill it
+lands on.
+
+**Tree / hierarchical** — RAPTOR builds a summary tree over your chunks and can
+retrieve at a level rather than a chunk, which helps on questions that span a
+whole document. PageIndex is *vectorless*: it reasons over a document tree
+instead of embedding, so there is no similarity threshold to tune.
+
+**Graph-enhanced** — Neo4j Hybrid and LightRAG extract entities and relations
+and blend a graph traversal into retrieval. Worth it when the answer depends on
+how things relate rather than on which passage is most similar. Expect a slower,
+more expensive ingest in exchange.
+
+<Aside type="caution" title="A store choice is a one-way door for that vector">
+Changing `vectorIndexTool` on an existing vector does not move a single chunk.
+The supported migration is: create a new vector on the new store, re-ingest, and
+swap the release over — which is what a connector's draft-and-swap does for you.
+</Aside>
+
+## Choosing
+
+| You want | Reach for |
+| --- | --- |
+| the default that needs no account of your own | Cloudflare Vectorize |
+| your data to stay in infrastructure you own | Qdrant, Redis, MongoDB Atlas, Couchbase (all BYOK) |
+| questions that span whole documents | RAPTOR or PageIndex |
+| answers about relationships between entities | Neo4j Hybrid or LightRAG |
+| an existing vector database you already pay for | Pinecone, Qdrant, Vertex AI Vector Search |
+
+## Retrieval is not only the vector leg
+
+Group retrieval runs a **keyword (full-text) leg** alongside the vector leg and
+fuses the results. That matters more than it sounds: on our own corpora lexical
+retrieval has measured markedly higher recall than the vector leg alone on
+questions containing exact terms, names or numbers. If a corpus answers well on
+paraphrases but badly on precise product names, the keyword leg is what you are
+missing.
+
+## See also
+
+- [Embeddings](/vendors/embeddings/) — the other half of a vector's identity.
+- [RAG Knowledge Base](/server/rag/) — creating and filling vectors.
+- [Knowledge (RAG) Settings](/server/knowledge/) — how a release resolves which vector to search.

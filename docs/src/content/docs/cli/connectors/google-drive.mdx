@@ -1,0 +1,74 @@
+---
+title: Google Drive
+description: Ingest Google Drive documents into a Divinci RAG vector, with push notifications when files change.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ingests documents and folders from a connected Google account. Drive is one of
+the four providers that gets **real-time push notifications**, so a changed file
+is picked up without waiting for the next poll.
+
+**Shape:** OAuth redirect. **Provider id:** `google_drive`.
+
+## Connect
+
+A human has to click Allow, so connecting starts in the web app:
+**Workspace → Setup → Connectors → Google Drive → Connect**.
+
+Headlessly you can still *start* the flow — the API hands back the URL to open:
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/google_drive/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"returnUrl":"https://app.divinci.app/…"}'
+# → { "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?…", "provider": "google_drive" }
+```
+
+Requires an API key with the `connector:write` scope.
+
+### Scopes requested
+
+`drive.readonly`, `drive.metadata.readonly`, plus `userinfo.email` and
+`userinfo.profile` to label the connection. **Read-only** — Divinci never writes
+to your Drive.
+
+## What gets ingested
+
+Non-trashed files the connected account can see. Selection happens on the
+Connectors page: browse or search Drive, pick files or folders, choose the
+pipeline (`rag`, or `rag` + `fine-tuning`), and sync.
+
+<Aside type="caution" title="Sync is not headless for this provider">
+`divinci connectors sync` and the v1 sync route accept **`web_crawl` and
+`wordpress` only**. Drive's pipeline needs an explicit file selection and an
+interactive user token, so the API returns a `400` naming the supported
+providers instead of queueing a job it could not fulfil. Sync Drive from the
+Connectors page.
+</Aside>
+
+## Keeping it fresh
+
+Drive changes arrive over a Google `changes.watch` push channel registered per
+connection. Those channels expire after hours-to-days, so Divinci persists the
+expiry and renews any channel within 12 hours of lapsing. If registration or
+renewal fails, the connection falls back to polling at its configured cadence —
+slower syncs, never no syncs.
+
+## From the CLI
+
+```bash
+divinci connectors status google_drive
+divinci connectors settings google_drive --auto-sync on --cadence 1440
+divinci connectors sync-status <connectionId>
+divinci connectors disconnect google_drive
+```
+
+`disconnect` revokes the token at Google as well as marking the connection
+revoked here.
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [Gmail](/cli/connectors/gmail/) · [Google Calendar](/cli/connectors/google-calendar/) — same OAuth app, different scopes.

@@ -1,0 +1,275 @@
+---
+title: "Caching & Performance"
+description: "The three caching layers Divinci uses to cut LLM latency and cost — CF AI Gateway, the Redis response-level semantic cache, and Gemini context caching — and how to enable and tune each per Release."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Divinci has three independent caching layers that reduce LLM latency and cost. They sit at different points in the request path, apply to different model lanes, and are tuned separately per **Release**. All three are **opt-in** (off by default) except Gemini implicit caching, which is on by default and free.
+
+This page covers what each layer is, when it applies, the model-lane trade-off, and the exact `divinci` CLI flags to enable and tune them.
+
+## The three layers at a glance
+
+| Layer | What it skips on a hit | Model lane it serves | Default |
+| --- | --- | --- | --- |
+| **CF AI Gateway cache** | LLM generation (edge-cached response) + adds observability | Workers AI (`@cf/…`), Google AI Studio (Gemini), Vertex fine-tunes | OFF |
+| **Redis response-level semantic cache** | The entire turn — RAG, moderation, escrow, **and** the LLM call | Any (model-agnostic; anonymous/public chat only) | OFF |
+| **Gemini context caching** | Re-billing the stable prompt prefix (≈90% input discount) | Gemini only | implicit-only (free, on) |
+
+The **model lane** determines which gateway-vs-context layer is relevant: Cloudflare Workers AI `@cf/…` models route through the **AI Gateway** cache; Gemini API generations get **context caching**. The Redis response-level cache is the only layer that bypasses generation entirely, and it is model-agnostic.
+
+<Aside type="caution" title="Response-level cache leaks answers across users by design">
+  A response-cache hit serves one user's stored answer to a different user. Only
+  enable it where answers do **not** vary per user — never for personalized RAG,
+  per-user memory, or auth-scoped data. It is wired only on the anonymous/public
+  chat path.
+</Aside>
+
+## Cloudflare AI Gateway cache
+
+### What it is and when to use it
+
+Enabling the AI Gateway rewrites the provider base URLs so LLM generation routes through a Cloudflare AI Gateway endpoint (`https://gateway.ai.cloudflare.com/v1/{accountId}/{gatewayId}/…`). You get two things: edge **response caching** for identical/repeated **non-streaming** generations (deterministic prompts, fixed conversation-starters) and **observability** (gateway log IDs, captured as `cf-aig-log-id`).
+
+Routing covers all three provider lanes — Workers AI (`@cf/…`), Google AI Studio (Gemini), and Vertex AI fine-tunes. Vertex `getModel`/endpoint resolution and the streaming path stay **direct**. The gateway is never a single point of failure: any gateway-path error retries direct.
+
+Use it when you want edge caching or per-request observability across model providers without changing application code.
+
+### Enable / disable
+
+```bash
+# Enable gateway routing (caching + observability) for a Release
+divinci release update <releaseId> --ai-gateway
+
+# Disable it
+divinci release update <releaseId> --no-ai-gateway
+```
+
+The CLI sets `{ enabled, useWhiteLabelDefaults: false, useDefaultGateway: true }` and deliberately sets **no** `gatewayId`, so the resolver falls back to the per-environment `CLOUDFLARE_AI_GATEWAY_ID` (correct across dev/staging/prod). The update flows through the workspace-scoped admin endpoint, so a workspace must be configured for OAuth CLI users.
+
+### Configure via API
+
+Send the `aiGateway` object to the Release draft-update endpoint:
+
+```json
+{ "aiGateway": { "enabled": true, "useDefaultGateway": true, "useWhiteLabelDefaults": false } }
+```
+
+Bring-your-own gateway — set `customAccountId` + `gatewayId` explicitly:
+
+```json
+{ "aiGateway": { "enabled": true, "customAccountId": "<cf-account-id>", "gatewayId": "my-gateway", "useWhiteLabelDefaults": false } }
+```
+
+Resolved endpoint shapes:
+
+```text
+# Workers AI
+https://gateway.ai.cloudflare.com/v1/{accountId}/{gatewayId}/workers-ai/{model}
+
+# Vertex AI (non-streaming) — sends header  cf-aig-cache-ttl: 3600
+https://gateway.ai.cloudflare.com/v1/{accountId}/{gatewayId}/google-vertex-ai/v1/{path}
+```
+
+### Server environment
+
+Set per environment:
+
+- `CLOUDFLARE_ACCOUNT_ID`
+- `CLOUDFLARE_AI_GATEWAY_ID` (e.g. `divinci-ai-gateway-01` on staging)
+- `CLOUDFLARE_AIG_GATEWAY_TOKEN` (optional; sent as `cf-aig-authorization` when the gateway is in Authenticated mode)
+
+### Defaults
+
+| Field | Default |
+| --- | --- |
+| Feature state | OFF |
+| `enabled` | `false` |
+| `useDefaultGateway` | `true` (`gatewayId` falls back to `divinci-ai-gateway`) |
+| Per-request cache TTL (`cf-aig-cache-ttl`) | `3600` (1h) when unset/≤0 |
+| Provisioned gateway `cache_ttl` | `0` (gateway-level caching OFF; caching is driven per-request) |
+
+`gatewayId` resolves as `config.gatewayId || CLOUDFLARE_AI_GATEWAY_ID`. `accountId` resolves as `config.customAccountId || config.accountId || CLOUDFLARE_ACCOUNT_ID`.
+
+### Gotchas
+
+- **Streaming strips caching.** The Gemini fine-tune streaming path deletes `cf-aig-cache-ttl` because the gateway buffers the whole SSE stream when asked to cache, defeating real-time token streaming. Gateway edge caching applies to **non-streaming** generations only; streaming gets observability/pass-through but no edge cache. (Streaming response reuse is covered by the Redis response cache below, which short-circuits before generation.)
+- **The Workers AI path doesn't send the TTL header.** It only rewrites the URL. With provisioned gateways at `cache_ttl: 0`, Workers AI generations are effectively not edge-cached unless the gateway is configured otherwise — you still get `cf-aig-log-id` observability.
+- **`cacheTtlSeconds` is largely unreachable** via the supported config surface — the CLI never sets it, the SDK type omits it, and the cast that validates incoming config drops it. Only the non-streaming Vertex path reads it, so a custom TTL is effectively settable only by direct DB write; otherwise it is always the 3600s default.
+- **Vertex `getModel`/endpoint resolution stays direct** (it needs the Google token); only `:generateContent` is gateway-routed, and the direct URL must match `https://{region}-aiplatform.googleapis.com/v1/{path}` or it falls back to direct.
+- **Precedence:** the Release config wins unless `useWhiteLabelDefaults: true`, in which case the WhiteLabel's `aiGateway` applies.
+
+## Redis response-level semantic cache
+
+### What it is and when to use it
+
+This is the only layer that **skips generation entirely**. On a hit it reuses a previously-generated final answer for a semantically-equivalent (or identical) prior prompt — model-agnostic, sub-second, near-zero cost. It is the "L2" of the homepage free-chat stack and is consulted **only on the anonymous/public chat path**.
+
+It has two sub-layers:
+
+- **Semantic layer** — cosine-similarity match over a bounded per-Release window of `{embedding, answer}` entries.
+- **Exact-match fast path ("L1.5")** — keyed on a `sha256` of `(releaseId, normalized prompt, language)`; replays the full cached turn (answer + retrieved sources + products), skipping RAG, moderation, escrow, **and** the LLM.
+
+Use it to make repeated/paraphrased prompts — especially fixed conversation-starters on a public landing page (e.g. the divinci.app homepage or DrFurman.ai) — return instantly. It is a dumb, best-effort Redis store: all Redis/embedding failures degrade silently to a cache miss and never break chat.
+
+<Aside type="caution" title="Cross-user leakage is intentional">
+  A hit serves one user's answer to another user. Enforcement that this is safe
+  is the **caller's** job — the module never checks. Never enable for
+  personalized, auth-scoped, or per-user-memory Releases.
+</Aside>
+
+### Enable / disable / tune (CLI)
+
+```bash
+# Enable with a 30-minute TTL
+divinci release update <releaseId> --response-cache --response-cache-ttl 1800
+
+# Disable
+divinci release update <releaseId> --no-response-cache
+
+# See the flags
+divinci release update --help
+```
+
+The CLI exposes only enable/disable + TTL. It **cannot** set `similarityThreshold` (and cannot go below the 0.97 default) — use the SDK/API for that.
+
+### Tune via SDK (full control)
+
+```typescript
+import { DivinciServer } from "@divinci-ai/server";
+
+const divinci = new DivinciServer({ apiKey: process.env.DIVINCI_API_KEY! });
+
+await divinci.releases.update(releaseId, {
+  publicResponseCache: {
+    enabled: true,
+    ttlSeconds: 3600,          // clamped server-side to [30, 86400]
+    similarityThreshold: 0.98, // clamped to [0.9, 1]; default 0.97
+  },
+});
+
+// Clear the config entirely
+await divinci.releases.update(releaseId, { publicResponseCache: null });
+```
+
+Server-side, `enabled` is coerced to `o.enabled === true`, `ttlSeconds` is clamped to `[30, 86400]` and floored, and `similarityThreshold` is clamped to `[0.9, 1]`. `null` clears the config; a missing field leaves it unchanged.
+
+### Defaults
+
+| Field | Default | Bounds |
+| --- | --- | --- |
+| `enabled` | `false` | — |
+| `ttlSeconds` | `3600` (1h) | `[30, 86400]` |
+| `similarityThreshold` | `0.97` | `[0.9, 1]` (floor 0.9, stricter than RAG's 0.8) |
+| Semantic window cap | 50 most-recent `{embedding, answer}` per Release | bounded linear scan, no standing index |
+| Exact-cache cap | 200 turns / Release, 256 KB / turn | — |
+
+Redis keys: semantic `response-semcache:<releaseId>`; exact data `response-exact:<releaseId>:<sha256>`; exact registry `response-exact-keys:<releaseId>`.
+
+### Gotchas
+
+- **Only wired on the anonymous/public chat path** — the homepage-chat route relies on it entirely; the authenticated add-message path never consults it.
+- **The exact fast path is first-turn only** (`anonymousChat.length === 0`), so it never replays a context-dependent follow-up.
+- **Style-pattern-advisory turns are not promoted to the exact cache** — replaying cached text would skip the engine and drop the advisory banner.
+- **A cache HIT settles the AI cost line at ~0** (zero-usage raw), so cached hits do **not** count against the daily spend cap.
+- **TTL is refreshed on every store**, so a hot key effectively never expires while traffic continues.
+- **Empty/whitespace answers are never stored** (avoids serving a blank reply); malformed Redis entries are skipped silently.
+- **Embedding failures are treated as a miss** — the matching embedding returns a zero-vector on failure and is rejected. A single consistent embedding model per Release window is assumed; mixing models invalidates cosine.
+
+## Gemini context caching
+
+### What it is and when to use it
+
+Context caching reuses the **stable prefix** of a Gemini request (system prompt + tools) so you aren't re-billed for it each turn. There are three modes:
+
+- **`off`** — no context caching.
+- **`implicit-only`** (default) — places system messages in Gemini's `systemInstruction` field so Google's free automatic prefix cache fires (≈90% input discount on Gemini 2.5+), with zero server-side resources.
+- **`explicit`** — additionally maintains Google `CachedContent` resources for the Release's stable system prompt + tools (tracked in a Mongo registry with a sliding-window TTL), guaranteeing a hit regardless of request gap, at the cost of per-token-hour storage.
+
+Use **explicit** only for Releases whose system prompt is **stable** (no per-query RAG in system messages) and large enough to clear the model's min-token floor. Otherwise **implicit-only** is the correct, free default.
+
+<Aside type="note" title="Gemini-only">
+  This path is read only by the Gemini generator. Cloudflare Workers AI `@cf/…`
+  models never use context caching — for those, use the AI Gateway cache above.
+</Aside>
+
+<Aside type="caution" title="Despite the name, this calls the Google Developer API">
+  CLI help and code comments say "Vertex," but the implementation calls the
+  Google Developer API (`generativelanguage.googleapis.com`), **not** Vertex
+  (`aiplatform.googleapis.com`).
+</Aside>
+
+### Enable / tune (CLI)
+
+```bash
+# Default — no flags needed; implicit-only is the free default
+
+# Explicit caching with a 2h hard TTL
+divinci release update <releaseId> --context-cache-mode explicit --context-cache-ttl-minutes 120
+
+# Explicit, but let the server derive TTL from observed reuse
+divinci release update <releaseId> --context-cache-mode explicit --adaptive-ttl
+
+# Explicit, but do NOT cache the system prompt + tools
+divinci release update <releaseId> --context-cache-mode explicit --no-cache-system-prompt
+
+# Disable all context caching
+divinci release update <releaseId> --context-cache-mode off
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--context-cache-mode <off\|implicit-only\|explicit>` | Caching mode |
+| `--context-cache-ttl-minutes <5-360>` | Hard TTL for explicit caches (ignored when adaptive) |
+| `--adaptive-ttl` | Derive TTL from rolling reuse instead of the hard value |
+| `--no-cache-system-prompt` | Explicit mode: do not cache the system prompt + tools |
+
+The `contextCache` update flows through the workspace-scoped admin endpoint, so an OAuth-only CLI user must have a workspace configured.
+
+### Configure via API
+
+```json
+{ "contextCache": { "mode": "explicit", "explicitTtlMinutes": 120, "adaptiveTtl": true, "cacheSystemPrompt": true } }
+```
+
+The full config object: `mode`, `explicitTtlMinutes` (5–360), `adaptiveTtl`, `cacheSystemPrompt`, `stableRagOrdering` (deterministically orders RAG chunks so implicit cache fires cross-query), and `cacheGroundingDocs` (Phase 4, not yet wired).
+
+### Inspect explicit caches
+
+```bash
+curl GET /white-label/:whitelabelId/release/:releaseId/context-cache/status
+# → { aggregate: { mode, totalCaches, activeCaches, totalCachedTokens, totalHits, estimatedStorageCostUsd }, caches: [...] }
+```
+
+This reports **explicit** caches only. Implicit-cache savings (the default mode) are **not** tracked here — use `scripts/gemini-cache-savings-report.py` against `[GEMINI-USAGE]` logs.
+
+### Defaults
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `mode` | `implicit-only` | when unset downstream |
+| `explicitTtlMinutes` | `60` | clamped/coerced to `[5, 360]` (non-finite/≤0 → 60) |
+| `adaptiveTtl` | `false` | adaptive TTL ≈ `(hits / ageHours) × 6` min, neutral 60 when age < 1min or 0 hits, clamped `[5, 360]` |
+| `cacheSystemPrompt` | `true` when `mode=explicit` | — |
+| `cacheGroundingDocs` | `false` | Phase 4, unimplemented |
+| `stableRagOrdering` | `false` | — |
+| `systemPromptStable` | `false` unless explicitly true | gate for explicit caching |
+| Min cached tokens | 1024 (flash tier) / 4096 (pro/2.0/unlisted) | — |
+| Cumulative cache lifetime | capped at 24h from creation | — |
+| Cache region | `global` | — |
+
+### Gotchas
+
+- **Explicit caching is automatically skipped when RAG injects per-query `[Source N]` system messages** — the cache key would churn per query, so `systemPromptStable` is set `false` whenever RAG context is present. RAG Releases still get the free implicit cache.
+- **Fallback models drop the cache** — explicit caching applies to the **primary** model only; a fallback generation does not carry `cacheContext`.
+- **All failures fall back to inline `systemInstruction`** and never block the user. A registry write failure leaves the Google cache live but unfindable, so a duplicate cache is created next request (wasted storage, not user-visible).
+- **The status endpoint's storage cost is a hardcoded placeholder** (`$1.00 / 1M tokens / hour`) pending verification against Google pricing.
+- **Cache uniqueness includes the model id** — a model version change creates a fresh cache, since cached content is bound to one Gemini model version.
+
+## Choosing layers together
+
+- **Public landing-page chat with fixed starters** → enable the **Redis response cache** (biggest win — skips everything) plus **implicit Gemini caching** (free). Add the **AI Gateway** for observability.
+- **Authenticated / personalized chat** → never use the response cache. Keep **implicit Gemini caching** (free); turn on **explicit** only if the system prompt is stable and large, and RAG is not injected into system messages.
+- **Workers AI (`@cf/…`) Releases** → context caching does not apply; use the **AI Gateway** cache/observability lane instead.
+- **Streaming responses** → AI Gateway edge caching does not apply (the TTL header is stripped); rely on the response cache (anonymous path) and Gemini context caching for cost relief.

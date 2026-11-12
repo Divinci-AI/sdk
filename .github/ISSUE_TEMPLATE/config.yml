@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://sdk.divinci.ai
+    about: Check our documentation for guides and API reference
+  - name: Discord Community
+    url: https://discord.gg/divinci
+    about: Ask questions and get help from the community
+  - name: Stack Overflow
+    url: https://stackoverflow.com/questions/tagged/divinci-ai
+    about: Search for existing answers or ask a question

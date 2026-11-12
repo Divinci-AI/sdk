@@ -1,0 +1,64 @@
+---
+title: Gmail
+description: Import Gmail threads as assistant context, with Pub/Sub push notification on new mail.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Imports email messages and threads from a connected Google account so an
+assistant can answer from what your inbox already knows.
+
+**Shape:** OAuth redirect. **Provider id:** `gmail`.
+
+<Aside type="caution" title="This ingests correspondence">
+Email is the connector most likely to carry other people's personal data —
+customers, patients, candidates. Scope it with a Gmail search filter and a label
+rather than connecting an inbox wholesale, and review
+[De-Identification (PII)](/server/de-identification/) before pointing an
+assistant at it.
+</Aside>
+
+## Connect
+
+**Workspace → Setup → Connectors → Gmail → Connect**, or start the flow over the
+API and open the returned `authUrl`:
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/gmail/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" -H "Content-Type: application/json" -d '{}'
+```
+
+### Scopes requested
+
+`gmail.readonly`, plus `userinfo.email` and `userinfo.profile`. Read-only —
+Divinci cannot send, delete or modify mail through this connector.
+
+## Scoping what is ingested
+
+Two filters are available on the connection:
+
+- **A Gmail search query** — the same syntax as the Gmail search box
+  (`from:billing@ has:attachment newer_than:1y`), applied as the sync filter.
+- **A label** — restrict to one `labelId`.
+
+## Keeping it fresh
+
+Gmail pushes via a `users.watch` channel (backed by a Cloud Pub/Sub topic on our
+side), registered per connection and renewed before it lapses. Failed
+registration degrades to polling at the connection's cadence.
+
+## From the CLI
+
+```bash
+divinci connectors status gmail
+divinci connectors settings gmail --auto-sync on --cadence 1440
+divinci connectors disconnect gmail
+```
+
+Sync itself runs from the Connectors page — the CLI and v1 API sync routes cover
+`web_crawl` and `wordpress` only.
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [De-Identification (PII)](/server/de-identification/)

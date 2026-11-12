@@ -1,0 +1,51 @@
+{
+  "generatedAt": "2026-10-16T06:28:25.831Z",
+  "environment": "production",
+  "note": "Aggregate counts only, refreshed weekly by .github/workflows/sdk-docs-tool-usage.yml. Never identifiers.",
+  "categories": {
+    "RAG/Vector": {
+      "unit": "RAG vectors",
+      "total": 65493,
+      "counts": {
+        "cloudflare-v2": 47794,
+        "turso-libsql": 17114,
+        "qdrant-cosine": 224,
+        "vertex-ai-vector-search-v2": 182,
+        "vertex-ai-vector-search": 97,
+        "pageindex": 34,
+        "divinci-pageindex": 12,
+        "turbopuffer": 5,
+        "mongodb-atlas": 5,
+        "pinecone-serverless": 5,
+        "neo4j-hybrid": 3,
+        "lightrag": 3,
+        "raptor": 3
+      }
+    },
+    "RAG/EmbeddingGenerator": {
+      "unit": "RAG vectors",
+      "total": 65493,
+      "counts": {
+        "@cf/google/embeddinggemma-300m": 64629,
+        "gemini-embedding-001@1536": 363,
+        "gemini-embedding-2-preview@1536": 297,
+        "@cf/baai/bge-base-en-v1.5": 43,
+        "gemini-embedding-001@3072": 37,
+        "voyage-4-lite": 1
+      }
+    },
+    "Audio/TextToSpeech": {
+      "unit": "releases overriding the default voice",
+      "total": 61100,
+      "counts": {
+        "browser-local": 5,
+        "cloudflare-aura-2": 4
+      }
+    },
+    "Connectors": {
+      "unit": "active connections",
+      "total": 79,
+      "counts": {}
+    }
+  }
+}

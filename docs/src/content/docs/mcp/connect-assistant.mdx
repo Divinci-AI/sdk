@@ -1,0 +1,189 @@
+---
+title: Connect Your Assistant
+description: Connect Claude, Cursor, or any MCP client to your Divinci account — no code, no API key. Sign in with your browser and your assistant can act on your account.
+---
+
+import { Steps, Aside, Tabs, TabItem, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+This is the no-code path. Point an MCP-compatible AI assistant — Claude Desktop,
+Claude on the web, Cursor, or any other MCP client — at Divinci's hosted server,
+sign in once in your browser, and the assistant can search your knowledge base,
+read and send chats, and operate on the rest of your account through the
+[tool catalog](/mcp/tool-catalog).
+
+You do **not** need the `@divinci-ai/mcp` package, an API key, or any code for
+this. (If you're building your own agent in TypeScript, use the
+[SDK client](/mcp/overview) instead.)
+
+## Server URL
+
+Divinci runs the MCP server at one endpoint per environment. Use **production**
+unless you've been told otherwise.
+
+| Environment | Server URL (Streamable HTTP) |
+|-------------|------------------------------|
+| Production  | `https://mcp.divinci.app/mcp`       |
+| Staging     | `https://mcp.stage.divinci.app/mcp` |
+| Dev         | `https://mcp.dev.divinci.app/mcp`   |
+
+<Aside type="caution">
+  **Always use the `/mcp` (Streamable HTTP) endpoint.** The legacy `/sse` and
+  `/message` paths return **HTTP 410 Gone** (retired 2026-08-07). If a client
+  defaults to or appends `/sse`, change the URL to end in `/mcp`.
+</Aside>
+
+## Add the server to your client
+
+<Tabs>
+<TabItem label="Claude (web)">
+
+In Claude on the web, open **Settings → Connectors → Add custom connector**,
+then paste the server URL:
+
+```
+https://mcp.divinci.app/mcp
+```
+
+Claude uses OAuth against Divinci (Client ID Metadata Documents / pre-registered
+clients — Dynamic Client Registration is retired) and opens a sign-in window.
+After you approve, the Divinci tools appear in the connectors menu.
+
+</TabItem>
+<TabItem label="Claude Desktop">
+
+Open **Settings → Developer → Edit Config** (or edit
+`claude_desktop_config.json` directly) and add:
+
+```json
+{
+  "mcpServers": {
+    "divinci": {
+      "url": "https://mcp.divinci.app/mcp"
+    }
+  }
+}
+```
+
+Restart Claude Desktop. On first use it opens a browser window for Divinci
+sign-in.
+
+<Aside type="note">
+  Older Claude Desktop builds can't reach a remote URL directly. If `"url"`
+  isn't recognized, use the `mcp-remote` bridge instead:
+
+  ```json
+  {
+    "mcpServers": {
+      "divinci": {
+        "command": "npx",
+        "args": ["-y", "mcp-remote", "https://mcp.divinci.app/mcp"]
+      }
+    }
+  }
+  ```
+</Aside>
+
+</TabItem>
+<TabItem label="Cursor">
+
+Add to your Cursor MCP settings (`~/.cursor/mcp.json` or
+**Settings → MCP → Add new server**):
+
+```json
+{
+  "mcpServers": {
+    "divinci": {
+      "url": "https://mcp.divinci.app/mcp"
+    }
+  }
+}
+```
+
+Cursor prompts you to sign in to Divinci the first time it connects.
+
+</TabItem>
+<TabItem label="Other clients">
+
+Any MCP client that supports a remote server over Streamable HTTP or SSE works.
+Give it the server URL and let it handle OAuth:
+
+```json
+{
+  "mcpServers": {
+    "divinci": {
+      "url": "https://mcp.divinci.app/mcp"
+    }
+  }
+}
+```
+
+The server advertises OAuth metadata at
+`/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`, supports Dynamic Client
+Registration at `/register`, and exposes an agent card at
+`/.well-known/agent-card.json` — so compliant clients discover and
+complete the sign-in flow with no manual configuration.
+
+</TabItem>
+</Tabs>
+
+## Sign in (the first connection)
+
+<Steps>
+
+1. **Connect.** Your client opens a Divinci sign-in window the first time it
+   reaches the server.
+
+2. **Authorize.** Sign in with your Divinci (Auth0) account and approve access.
+   The assistant connects on behalf of *your* identity, so it can only see and
+   change what your account is permitted to.
+
+3. **Use the tools.** The assistant now lists Divinci tools and can call them.
+   Try: *"Search my Divinci knowledge base for refund policy"* or *"List my
+   Divinci releases."*
+
+</Steps>
+
+There is **no API key in the config** — authentication is OAuth 2.0 (Auth0,
+PKCE). The browser flow runs on first connect and the client refreshes tokens
+silently after that.
+
+## Static API key (alternative)
+
+If your client can't do an interactive browser flow — a headless agent, a CI
+job — use a Bearer API key from the **API Keys** page of your Divinci workspace
+instead of OAuth:
+
+```json
+{
+  "mcpServers": {
+    "divinci": {
+      "url": "https://mcp.divinci.app/mcp",
+      "headers": {
+        "Authorization": "Bearer YOUR_DIVINCI_API_KEY"
+      }
+    }
+  }
+}
+```
+
+The API key's permissions scope exactly what the assistant can do — the same
+permission model as the OAuth identity.
+
+<Aside type="caution">
+  Treat the API key like a password. It carries every permission granted to it;
+  store it in your client's secret store, never in a shared or committed config
+  file.
+</Aside>
+
+## What can the assistant do?
+
+Everything your account is permitted to — knowledge-base search, chat,
+releases, RAG ingestion, fine-tuning, QA, analytics, notifications, and more.
+See the full list:
+
+<CardGrid>
+  <LinkCard title="Tool Catalog" href="/mcp/tool-catalog" description="Every tool an assistant can call, grouped by area." />
+  <LinkCard title="Authentication" href="/mcp/authentication" description="The Auth0 PKCE flow in detail (for SDK builders)." />
+  <LinkCard title="Premium tools & payments" href="/mcp/payments" description="Pay-per-call tools via x402." />
+</CardGrid>

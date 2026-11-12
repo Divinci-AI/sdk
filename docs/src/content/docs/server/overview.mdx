@@ -1,0 +1,190 @@
+---
+title: Server SDK Overview
+description: Node.js SDK for full platform access
+---
+
+
+The `@divinci-ai/server` package provides a Node.js SDK for server-side operations against the Divinci platform.
+
+## Features
+
+- Workspace, release, and RAG management
+- Group, permission, and API key administration
+- Arena experiments and arena presets
+- Audio transcripts, fine-tuning, training-data, and QA pipelines
+- x402 payment handling for premium tools
+- Meta-harness orchestration loops
+- Full TypeScript support
+
+## Installation
+
+```bash
+npm install @divinci-ai/server
+```
+
+## Basic Usage
+
+```typescript
+import { DivinciServer } from "@divinci-ai/server";
+
+const divinci = new DivinciServer({
+  apiKey: process.env.DIVINCI_API_KEY,
+});
+
+// List workspaces
+const workspaces = await divinci.workspaces.list();
+```
+
+## Configuration Options
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `apiKey` | `string` | Yes* | Your secret API key (*or `accessToken`) |
+| `accessToken` | `string` | No | OAuth access token, alternative to `apiKey` |
+| `defaultWorkspaceId` | `string` | No | Default workspace for calls that accept one |
+| `baseUrl` | `string` | No | Override API base URL (default `https://api.divinci.app`) |
+| `timeout` | `number` | No | Request timeout in ms (default `30000`) |
+| `maxRetries` | `number` | No | Retries for transient failures (default `3`) |
+| `x402` | `X402Config` | No | Payment wallet + autopay config ([x402](/server/x402)) |
+| `debug` | `boolean` | No | Verbose logging |
+
+Set or read the default workspace at runtime with
+`divinci.setDefaultWorkspaceId(id)` and `divinci.getDefaultWorkspaceId()`.
+
+## Available APIs
+
+The `DivinciServer` instance exposes lazy-instantiated resource clients as properties:
+
+| Property | Client | Purpose |
+|----------|--------|---------|
+| `workspaces` | `WorkspaceClient` | Create, list, update, delete workspaces |
+| `releases` | `ReleaseClient` | Manage releases and deployments |
+| `terms` | `TermsClient` | Release Terms of Service versions and acceptance |
+| `skills` | `SkillsClient` | Skill catalog + instances ([BYOK & Skills](/server/byok-and-skills/)) |
+| `aiChats` | `AiChatsClient` | AI chat threads |
+| `mcpServers` | `McpServersClient` | External MCP servers attached as assistant tools |
+| `rag` | `RagClient` | Collections, documents, chunks, search |
+| `apiKeys` | `ApiKeyClient` | Create, list, rotate, delete workspace API keys |
+| `byok` | `BYOKClient` | Bring-your-own-key provider credentials ([BYOK & Skills](/server/byok-and-skills/)) |
+| `arena` | `ArenaClient` | A/B test variants and routing (presets via `arena.presets`) |
+| `transcripts` | `TranscriptClient` | Conversation histories and messages |
+| `audio` | `AudioClient` | Audio upload, transcripts, RAG generation |
+| `fineTune` | `FineTuneClient` | Fine-tuning jobs |
+| `config` | `ConfigClient` | Workspace title, description, settings |
+| `trainingData` | `TrainingDataClient` | Synthetic training data from RAG |
+| `qa` | `QAClient` | QA suites, runs, scorers |
+| `redTeam` | `RedTeamClient` | Adversarial probes against a deployed release ([Red Teaming](/server/red-team/)) |
+| `x402` | `X402Client` | Payment receipts and wallet utilities |
+| `groups` | `GroupClient` | User group CRUD + invites |
+| `permissions` | `PermissionClient` | Grant / revoke permissions on users, groups, and the logged-in / anonymous principals |
+| `metaHarness` | `MetaHarnessClient` | Long-running orchestration loops, iterations, and proposals |
+| `notifications` | `NotificationClient` | Notification feed, channels, triggers, flaggers ([observability](/server/observability)) |
+| `analytics` | `AnalyticsClient` | Product analytics ([observability](/server/observability)) |
+| `metrics` | `MetricsClient` | Pipeline telemetry + alert configs ([observability](/server/observability)) |
+| `usage` | `UsageClient` | API-key usage reporting ([observability](/server/observability)) |
+| `feedback` | `FeedbackClient` | Message feedback read + stats ([observability](/server/observability)) |
+| `spendGuard` | `SpendGuardClient` | Budget checks, spend recording, daily summaries, alerts ([Spend Guard](/server/spend-guard/)) |
+
+All clients are lazily constructed on first access — instantiating `DivinciServer` does not open connections or allocate per-client resources.
+
+## Identity & access clients
+
+### `groups` — `GroupClient`
+
+Manage user groups within a workspace and their memberships.
+
+```typescript
+const { groups } = await divinci.groups.list();
+
+const { group } = await divinci.groups.create({ name: "Engineering" });
+await divinci.groups.update(group.id, { name: "Platform Engineering" });
+
+await divinci.groups.invite(group.id, "user@example.com");
+await divinci.groups.removeMember(group.id, "user_abc123");
+await divinci.groups.removeInvite(group.id, "stale@example.com");
+
+await divinci.groups.delete(group.id);
+```
+
+| Method | Description |
+|--------|-------------|
+| `list()` | List groups in the active workspace |
+| `get(groupId)` | Fetch a single group |
+| `create(options)` | Create a new group |
+| `update(groupId, options)` | Rename / update a group |
+| `delete(groupId)` | Delete a group |
+| `invite(groupId, email)` | Invite a user by email |
+| `removeMember(groupId, userId)` | Remove an existing member |
+| `removeInvite(groupId, email)` | Cancel a pending invite |
+
+### `permissions` — `PermissionClient`
+
+Grant and revoke permissions on workspace resources. Principals can be specific users, groups, every authenticated user (`loggedIn`), or anonymous visitors.
+
+```typescript
+// What can the current caller do here?
+const { permissions } = await divinci.permissions.getMine();
+
+// Inspect the full permission document
+const { permissions: doc, validPermissions } = await divinci.permissions.get();
+
+// Grant a permission to a user by email
+await divinci.permissions.grantToUser("editor@acme.com", ["rag.write"]);
+
+// Revoke from a user (by id or email)
+await divinci.permissions.revokeFromUser({ email: "former@acme.com" });
+
+// Grant a permission to a group
+await divinci.permissions.grantToGroup("engineering", ["release.publish"]);
+await divinci.permissions.revokeFromGroup("engineering");
+
+// Set what every logged-in / anonymous user can do
+await divinci.permissions.setLoggedIn(["chat.send"]);
+await divinci.permissions.setAnonymous([]);  // lock anonymous access entirely
+```
+
+| Method | Description |
+|--------|-------------|
+| `get()` | Full permission document plus the list of valid permission strings |
+| `getMine()` | Permissions the current caller effectively has |
+| `grantToUser(email, perms)` | Add permissions to a user |
+| `revokeFromUser({ userId? \| email? })` | Remove all permissions from a user |
+| `grantToGroup(slug, perms)` | Add permissions to a group |
+| `revokeFromGroup(slug)` | Remove all permissions from a group |
+| `setLoggedIn(perms)` | Replace the logged-in principal's permission set |
+| `setAnonymous(perms)` | Replace the anonymous principal's permission set |
+
+## Orchestration: `metaHarness` — `MetaHarnessClient`
+
+Drive long-running orchestration **loops** that propose and apply changes iteratively. Useful for autonomous QA / arena / style-pattern improvement cycles. Three sub-clients:
+
+```typescript
+// Loop control
+const loop = await divinci.metaHarness.loop.get();
+await divinci.metaHarness.loop.update({ /* loop config */ });
+await divinci.metaHarness.loop.iterate();   // advance one step
+await divinci.metaHarness.loop.pause();
+await divinci.metaHarness.loop.resume();
+await divinci.metaHarness.loop.cancel();
+
+// Iteration history
+const iterations = await divinci.metaHarness.iterations.list({ limit: 20 });
+const iteration  = await divinci.metaHarness.iterations.get("iter_abc");
+
+// Proposals produced by iterations
+const proposals  = await divinci.metaHarness.proposals.list({ status: "pending" });
+await divinci.metaHarness.proposals.accept("prop_xyz");
+await divinci.metaHarness.proposals.reject("prop_xyz", { reason: "off-policy" });
+```
+
+| Sub-client | Methods |
+|------------|---------|
+| `metaHarness.loop` | `get`, `update`, `iterate`, `pause`, `resume`, `cancel` |
+| `metaHarness.iterations` | `list`, `get` |
+| `metaHarness.proposals` | `list`, `accept`, `reject` |
+
+## Next Steps
+
+- [Workspaces](/server/workspaces) — Manage workspaces
+- [Releases](/server/releases) — Manage releases
+- [RAG](/server/rag) — Document operations

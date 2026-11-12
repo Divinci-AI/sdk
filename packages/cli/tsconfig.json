@@ -1,0 +1,27 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "composite": true,
+    // composite: true auto-enables incremental builds, which emit a
+    // ~87 kB .tsbuildinfo cache. Point it outside dist/ so it stays
+    // out of the published tarball (the npm `files` allowlist only
+    // includes dist/ and README.md).
+    "tsBuildInfoFile": "./.tsbuildinfo/cli.tsbuildinfo",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "paths": {
+      "@divinci-ai/types": ["../types/src/index.ts"],
+      "@divinci-ai/server": ["../server/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*", "bin/**/*"],
+  "exclude": ["node_modules", "dist", "**/*.test.ts"],
+  "references": [
+    { "path": "../types" },
+    { "path": "../server" }
+  ]
+}

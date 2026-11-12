@@ -1,0 +1,192 @@
+{
+	"_comment": "SHARED golden vectors for the TrustBench canonical-JSON encoder. Asserted against ALL THREE implementations (TS verifier, TS server-resources, Python eval-harness). Do NOT hand-edit a single encoder's expectation — regenerate via tests/generate-canonical-vectors.ts and keep all three green. See B1 audit (repr-vs-String float formatting + codepoint-vs-UTF16 key sort).",
+	"vectors": [
+		{
+			"name": "sorts object keys",
+			"input": {
+				"b": 1,
+				"a": 2
+			},
+			"canonical": "{\"a\":2,\"b\":1}"
+		},
+		{
+			"name": "sorts nested object keys",
+			"input": {
+				"b": {
+					"y": 1,
+					"x": 2
+				},
+				"a": 3
+			},
+			"canonical": "{\"a\":3,\"b\":{\"x\":2,\"y\":1}}"
+		},
+		{
+			"name": "preserves array order",
+			"input": [
+				3,
+				1,
+				2
+			],
+			"canonical": "[3,1,2]"
+		},
+		{
+			"name": "no whitespace mixed",
+			"input": {
+				"a": 1,
+				"b": [
+					1,
+					2,
+					3
+				]
+			},
+			"canonical": "{\"a\":1,\"b\":[1,2,3]}"
+		},
+		{
+			"name": "null and booleans",
+			"input": {
+				"a": null,
+				"b": true,
+				"c": false
+			},
+			"canonical": "{\"a\":null,\"b\":true,\"c\":false}"
+		},
+		{
+			"name": "unicode strings (BMP)",
+			"input": {
+				"s": "café 你好"
+			},
+			"canonical": "{\"s\":\"café 你好\"}"
+		},
+		{
+			"name": "string escapes",
+			"input": {
+				"s": "a \"b\" c"
+			},
+			"canonical": "{\"s\":\"a \\\"b\\\" c\"}"
+		},
+		{
+			"name": "integers",
+			"input": {
+				"n": 42
+			},
+			"canonical": "{\"n\":42}"
+		},
+		{
+			"name": "common score fraction",
+			"input": {
+				"score": 0.842
+			},
+			"canonical": "{\"score\":0.842}"
+		},
+		{
+			"name": "half",
+			"input": {
+				"e": 1.5
+			},
+			"canonical": "{\"e\":1.5}"
+		},
+		{
+			"name": "sci small 1e-7",
+			"input": {
+				"n": 1e-7
+			},
+			"canonical": "{\"n\":1e-7}"
+		},
+		{
+			"name": "sci small 2.5e-8",
+			"input": {
+				"n": 2.5e-8
+			},
+			"canonical": "{\"n\":2.5e-8}"
+		},
+		{
+			"name": "boundary 1e-6 -> decimal",
+			"input": {
+				"n": 0.000001
+			},
+			"canonical": "{\"n\":0.000001}"
+		},
+		{
+			"name": "boundary 1e-5 -> decimal",
+			"input": {
+				"n": 0.00001
+			},
+			"canonical": "{\"n\":0.00001}"
+		},
+		{
+			"name": "tiny 1.23e-10",
+			"input": {
+				"n": 1.23e-10
+			},
+			"canonical": "{\"n\":1.23e-10}"
+		},
+		{
+			"name": "large 1e21 -> sci",
+			"input": {
+				"n": 1e+21
+			},
+			"canonical": "{\"n\":1e+21}"
+		},
+		{
+			"name": "large 1e22 -> sci",
+			"input": {
+				"n": 1e+22
+			},
+			"canonical": "{\"n\":1e+22}"
+		},
+		{
+			"name": "large fractional 1.5e22",
+			"input": {
+				"n": 1.5e+22
+			},
+			"canonical": "{\"n\":1.5e+22}"
+		},
+		{
+			"name": "negative fractional",
+			"input": {
+				"n": -0.0001
+			},
+			"canonical": "{\"n\":-0.0001}"
+		},
+		{
+			"name": "negative sci",
+			"input": {
+				"n": -3.2e-9
+			},
+			"canonical": "{\"n\":-3.2e-9}"
+		},
+		{
+			"name": "astral key before high-BMP digraph",
+			"input": {
+				"😀": 1,
+				"ﬀ": 2
+			},
+			"canonical": "{\"😀\":1,\"ﬀ\":2}"
+		},
+		{
+			"name": "astral key before private-use BMP",
+			"input": {
+				"": 1,
+				"😀": 2
+			},
+			"canonical": "{\"😀\":2,\"\":1}"
+		},
+		{
+			"name": "astral mixed with ascii",
+			"input": {
+				"z": 1,
+				"😀": 2,
+				"a": 3
+			},
+			"canonical": "{\"a\":3,\"z\":1,\"😀\":2}"
+		},
+		{
+			"name": "two astral keys ordered",
+			"input": {
+				"🚀": 1,
+				"😀": 2
+			},
+			"canonical": "{\"😀\":2,\"🚀\":1}"
+		}
+	]
+}

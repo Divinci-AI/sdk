@@ -1,0 +1,120 @@
+---
+/**
+ * SiteTitle override: renders Starlight's default logo + wordmark on top of a
+ * faint blueprint / technical-drawing SVG backdrop (concentric construction
+ * circles, a dimension line, registration marks, a dashed bounding box) — a
+ * nod to the "SDK as engineering blueprint" idea, in the spirit of the Gemma
+ * logo's technical styling. Purely decorative (aria-hidden, pointer-events
+ * none); the real link/logo from the default component sits above it.
+ */
+import Default from "@astrojs/starlight/components/SiteTitle.astro";
+---
+
+<div class="bp-title">
+  <svg
+    class="bp-art"
+    viewBox="0 0 280 64"
+    fill="none"
+    aria-hidden="true"
+    preserveAspectRatio="xMidYMid meet"
+  >
+    <g
+      stroke="currentColor"
+      stroke-width="1"
+      vector-effect="non-scaling-stroke"
+      stroke-linecap="round"
+    >
+      <!-- dashed bounding box -->
+      <rect x="2" y="2" width="276" height="60" rx="5" stroke-dasharray="6 5" opacity="0.6" />
+
+      <!-- (construction circle + crosshair moved to .bp-logo-ring below, which
+           is anchored to the logo box so it stays centered on the robot) -->
+
+      <!-- dimension line with end ticks + arrow ticks -->
+      <line x1="74" y1="52" x2="262" y2="52" opacity="0.75" />
+      <line x1="74" y1="47" x2="74" y2="57" />
+      <line x1="262" y1="47" x2="262" y2="57" />
+      <path d="M80 52 l6 -3 M80 52 l6 3" opacity="0.8" />
+      <path d="M256 52 l-6 -3 M256 52 l-6 3" opacity="0.8" />
+
+      <!-- registration plus-marks -->
+      <path d="M128 14 v8 M124 18 h8" opacity="0.7" />
+      <path d="M226 22 v8 M222 26 h8" opacity="0.7" />
+
+      <!-- diagonal construction hatch (top-right) -->
+      <line x1="196" y1="6" x2="214" y2="6" opacity="0.5" />
+      <line x1="190" y1="12" x2="220" y2="12" opacity="0.5" />
+      <line x1="200" y1="18" x2="212" y2="18" opacity="0.5" />
+
+      <!-- small radius arc -->
+      <path d="M150 40 a14 14 0 0 1 22 -4" stroke-dasharray="2 4" opacity="0.6" />
+    </g>
+  </svg>
+
+  <!-- Construction circle + crosshair, anchored to the (square) logo box via
+       CSS so it stays centered on the robot regardless of wordmark width — no
+       hard-coded pixel offset. -->
+  <svg
+    class="bp-logo-ring"
+    viewBox="0 0 64 64"
+    fill="none"
+    aria-hidden="true"
+    preserveAspectRatio="xMidYMid meet"
+  >
+    <g
+      stroke="currentColor"
+      stroke-width="1"
+      vector-effect="non-scaling-stroke"
+      stroke-linecap="round"
+    >
+      <circle cx="32" cy="32" r="30" stroke-dasharray="3 4" opacity="0.7" />
+      <circle cx="32" cy="32" r="21" />
+      <line x1="0" y1="32" x2="64" y2="32" opacity="0.7" />
+      <line x1="32" y1="2" x2="32" y2="62" opacity="0.7" />
+    </g>
+  </svg>
+
+  <Default {...Astro.props}><slot /></Default>
+</div>
+
+<style>
+  .bp-title {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .bp-art {
+    position: absolute;
+    inset: -0.45rem -1.4rem;
+    width: calc(100% + 2.8rem);
+    height: calc(100% + 0.9rem);
+    pointer-events: none;
+    z-index: 0;
+    overflow: visible;
+    color: var(--sl-color-accent-high);
+    opacity: 0.4;
+  }
+  /* Construction circle locked to the logo: a square overlay (aspect-ratio 1)
+     the same height as the logo box, pinned to its left edge, with the circle
+     drawn at its center. Since the logo PNG is square and the robot is centered
+     in it, the circle centers on the robot by construction — it tracks the logo
+     size and needs no pixel nudge. */
+  .bp-logo-ring {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 100%;
+    aspect-ratio: 1 / 1;
+    pointer-events: none;
+    z-index: 0;
+    overflow: visible;
+    color: var(--sl-color-accent-high);
+    opacity: 0.4;
+  }
+  /* Lift the real logo + wordmark above the blueprint art. */
+  .bp-title :global(.site-title) {
+    position: relative;
+    z-index: 1;
+  }
+</style>

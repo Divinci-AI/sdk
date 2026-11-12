@@ -1,0 +1,67 @@
+{
+  "name": "@divinci-ai/trustbench-verifier",
+  "version": "0.9.0",
+  "description": "Verify TrustBench attested benchmark run manifests. Pure TypeScript, MIT-licensed, no Divinci-internal dependencies — works in browsers, Node, Workers, and Deno.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "node ../../scripts/assert-packed-deps.mjs && node ../../scripts/assert-version-honesty.mjs",
+    "build": "tsc",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepare": "rm -rf dist tsconfig.tsbuildinfo && tsc",
+    "prepublishOnly": "pnpm run build"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^2.1.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.10",
+    "@vitest/coverage-v8": "^3.2.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "trustbench",
+    "divinci",
+    "ai",
+    "evaluation",
+    "attestation",
+    "ed25519",
+    "verifier",
+    "benchmark"
+  ],
+  "author": "Divinci AI <engineering@divinci.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues"
+  },
+  "homepage": "https://app.divinci.app/trust",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}

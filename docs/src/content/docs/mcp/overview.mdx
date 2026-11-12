@@ -1,0 +1,87 @@
+---
+title: MCP SDK Overview
+description: A Model Context Protocol client for connecting AI assistants to Divinci tools and resources.
+---
+
+import { Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+`@divinci-ai/mcp` is a client for the [Model Context
+Protocol](https://modelcontextprotocol.io). It connects MCP-compatible AI
+assistants — Claude Desktop, Cursor, or your own agent — to Divinci's tools and
+resources over the Streamable HTTP transport, with optional Auth0 sign-in and x402
+pay-per-call.
+
+<Aside type="tip" title="Looking for the no-code path?">
+  This page is the **TypeScript SDK client**. If you just want to point an
+  assistant at your account, you don't need this package — see
+  [Connect Your Assistant](/mcp/connect-assistant). To publish a release as its
+  own MCP server for your consumers, see
+  [Release as an MCP Server](/mcp/whitelabel-servers).
+</Aside>
+
+## Features
+
+- Tool discovery and invocation
+- Resource and prompt access
+- Auto-reconnecting Streamable HTTP transport
+- Auth0 (PKCE) authentication
+- x402 payments for premium tools
+
+## Installation
+
+```bash
+npm install @divinci-ai/mcp
+```
+
+## Basic usage
+
+Tool and resource operations hang off the client; tool calls specifically live on
+the `tools` accessor.
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+});
+
+await mcp.connect();
+
+// Discover and call tools via the `tools` accessor
+const tools = await mcp.tools.listTools();
+const result = await mcp.tools.callTool("search_knowledge", { query: "refunds" });
+```
+
+<Aside type="caution">
+  Tool methods are on <code>mcp.tools</code> — `mcp.tools.listTools()`,
+  `mcp.tools.callTool(...)` — not on the client directly. Resources and prompts
+  (`mcp.listResources()`, `mcp.listPrompts()`) are on the client itself.
+</Aside>
+
+## Configuration options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `serverUrl` | `string` | — | **Required.** MCP server URL. |
+| `clientName` | `string` | `divinci-mcp-client` | Identifies your client to the server. |
+| `clientVersion` | `string` | `0.1.0` | Your client version. |
+| `timeout` | `number` | `30000` | Request timeout (ms). |
+| `autoReconnect` | `boolean` | `true` | Reconnect dropped connections. |
+| `maxReconnectAttempts` | `number` | `5` | Reconnect attempts before giving up. |
+| `auth` | `McpAuthOptions` | — | Auth0 config ([Authentication](/mcp/authentication)). |
+| `payment` | `McpPaymentOptions` | — | x402 wallet + autopay ([Payments](/mcp/payments)). |
+| `debug` | `boolean` | `false` | Verbose logging. |
+
+<Aside type="note">
+  There is no `apiKey` option. The Divinci MCP server authenticates with **Auth0
+  (PKCE)** — see [Authentication](/mcp/authentication).
+</Aside>
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Connecting" href="/mcp/connecting" description="Lifecycle, connection state, and reconnection." />
+  <LinkCard title="Tools" href="/mcp/tools" description="Discover, call, and build tools." />
+  <LinkCard title="Resources & Prompts" href="/mcp/resources" description="Read resources and fetch prompts." />
+  <LinkCard title="Authentication" href="/mcp/authentication" description="The Auth0 PKCE browser flow." />
+</CardGrid>

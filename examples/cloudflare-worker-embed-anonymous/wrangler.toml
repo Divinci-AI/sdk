@@ -1,0 +1,30 @@
+name = "divinci-embed-anonymous"
+main = "src/index.ts"
+compatibility_date = "2024-05-24"
+compatibility_flags = ["nodejs_compat"]
+
+[observability]
+enabled = false
+head_sampling_rate = 0.01
+
+[placement]
+mode = "smart"
+
+[vars]
+ENVIRONMENT = "production"
+# Canonical embed script host
+EMBED_SCRIPT_URL = "https://assets.divinci.app/embed-script.js"
+# Replace with one of YOUR releases that has anonymous chat enabled
+RELEASE_ID = "your-release-id"
+# Set to "true" only after configuring Cloudflare Access secrets
+# (TEAM_DOMAIN + POLICY_AUD via `wrangler secret put`)
+REQUIRE_ACCESS_AUTH = "false"
+
+# Optional: per-environment overrides, e.g.
+# [env.staging]
+# name = "divinci-embed-anonymous-staging"
+# [env.staging.vars]
+# ENVIRONMENT = "staging"
+# EMBED_SCRIPT_URL = "https://assets.stage.divinci.app/embed-script.js"
+# RELEASE_ID = "your-staging-release-id"
+# REQUIRE_ACCESS_AUTH = "false"

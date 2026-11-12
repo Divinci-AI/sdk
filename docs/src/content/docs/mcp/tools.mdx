@@ -1,0 +1,142 @@
+---
+title: MCP Tools
+description: Discover, invoke, and build tools exposed by the Divinci MCP server.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Divinci MCP server exposes tools that AI assistants can discover and invoke.
+Each tool has a name, a human-readable description, and a JSON Schema for its
+arguments. All tool operations live on the **`mcp.tools`** accessor.
+
+## Listing tools
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({ serverUrl: "https://mcp.divinci.app" });
+await mcp.connect();
+
+const tools = await mcp.tools.listTools();
+for (const tool of tools) {
+  console.log(`${tool.name}: ${tool.description}`);
+  if (tool.pricing) {
+    console.log(`  Price: $${tool.pricing.priceUsd}`);
+  }
+}
+
+// Fetch a single tool by name
+const one = await mcp.tools.getTool("search_knowledge");
+```
+
+## Calling a tool
+
+```typescript
+const result = await mcp.tools.callTool("search_knowledge", {
+  query: "How do I reset my password?",
+  limit: 5,
+});
+
+for (const block of result.content) {
+  if (block.type === "text") {
+    console.log(block.text);
+  }
+}
+
+if (result.isError) {
+  console.error("Tool reported an error");
+}
+```
+
+`callTool` also accepts options for a per-call timeout or payment override:
+
+```typescript
+await mcp.tools.callTool("search_knowledge", { query: "..." }, { timeout: 60_000 });
+```
+
+## Tool shape
+
+Every tool returned by `listTools()` matches the `McpTool` interface:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Unique tool identifier |
+| `description` | `string` | What the tool does |
+| `inputSchema` | `McpToolInputSchema` | JSON Schema for arguments |
+| `pricing` | `McpToolPricing?` | Optional x402 pricing |
+
+A tool result is `{ content: McpContent[]; isError?: boolean }`, where each content
+block is text, image, or an embedded resource.
+
+## Building tool schemas
+
+Use `ToolBuilder` to construct a tool definition (for example, to register on your
+own MCP server):
+
+```typescript
+import { ToolBuilder } from "@divinci-ai/mcp";
+
+const searchTool = new ToolBuilder("advanced_search")
+  .describe("Search with advanced filters")
+  .addString("query", { required: true, description: "Search query" })
+  .addNumber("limit", { description: "Max results" })
+  .addBoolean("exact", { description: "Exact match only" })
+  .addArray("categories", "string", { description: "Filter categories" })
+  .build();
+```
+
+## Premium (paid) tools
+
+When a tool's catalog entry includes a `pricing` object, calling it returns HTTP
+**402 Payment Required** until the request carries a valid payment. The SDK can
+pay automatically (autopay) or surface a `PaymentRequiredError` for you to handle.
+
+```typescript
+// Inspect price before calling — no extra request needed
+const premium = (await mcp.tools.listTools()).filter((t) => t.pricing);
+
+// Or use the pricing helpers
+const priced = await mcp.tools.getPricing();
+const price = await mcp.tools.getToolPrice("advanced_search");
+```
+
+See **[x402 Payments](/mcp/payments)** for the full autopay and manual flows.
+
+## Terms of Service gate
+
+If a release references a **published Terms of Service** document, message
+sends (`send_message`) are blocked server-side until
+the calling identity accepts the current version. A blocked send returns an
+`isError` result containing the full terms (title, version, markdown) and
+the exact follow-up call to make. Two tools complete the flow:
+
+- **`terms_get_for_release`** `{ releaseId }` — returns the gate:
+  `{ required: false }` when nothing needs accepting, otherwise
+  `{ required: true, tosId, version, title, content }`.
+- **`terms_accept`** `{ tosId, version, releaseId? }` — records acceptance
+  for the API-key identity. A stale `version` (a newer ToS was published)
+  returns 409 — refetch the gate and re-present the terms.
+
+<Aside type="caution">
+Agents should present the terms to their human user and get explicit
+agreement before calling `terms_accept` — acceptance is recorded as a legal
+act for the authenticated identity. Publishing a new ToS version re-gates
+every identity on their next message.
+</Aside>
+
+## Reacting to catalog changes
+
+The server pushes `notifications/tools/list_changed` when its catalog changes.
+Subscribe with `onToolsChanged` to refresh automatically:
+
+```typescript
+mcp.on({
+  onToolsChanged: (tools) => updateToolMenu(tools),
+});
+```
+
+## Related
+
+- [x402 Payments](/mcp/payments) — pay for premium tool calls.
+- [Resources & Prompts](/mcp/resources) — read server data and fetch prompts.
+- [Connecting](/mcp/connecting) — lifecycle and connection state.

@@ -1,0 +1,272 @@
+---
+title: Authentication
+description: API keys, user tokens, and external users — and where each belongs.
+---
+
+import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
+
+Each package authenticates a little differently because each runs in a different
+trust context. This page covers the **client** and **server** SDKs; the MCP SDK
+uses an Auth0 PKCE flow documented separately in
+[MCP Authentication](/mcp/authentication).
+
+## Server SDK — API key
+
+The server SDK runs on your trusted backend and authenticates with a secret API
+key (or an OAuth access token). The `apiKey` is required unless you pass
+`accessToken`.
+
+```typescript
+import { DivinciServer } from "@divinci-ai/server";
+
+const divinci = new DivinciServer({
+  apiKey: process.env.DIVINCI_API_KEY, // never hardcode
+});
+
+// Verify the key is valid and active
+const ok = await divinci.validateApiKey();
+```
+
+<Aside type="danger" title="Backend only">
+  A server API key has full platform access. Never ship it to a browser, mobile
+  app, or any client you don't control. For browser chat, use a user token or an
+  external-user identity (below).
+</Aside>
+
+## Client SDK — three ways to identify the caller
+
+The client SDK always needs a `releaseId`. Beyond that, choose **one** identity
+mechanism depending on how much you trust the runtime.
+
+### 1. User token (recommended for browsers)
+
+Pass a short-lived JWT your backend issues for the signed-in user. Internally the
+client wraps it in a `SimpleTokenStorage`.
+
+```typescript
+import { DivinciClient } from "@divinci-ai/client";
+
+const client = new DivinciClient({
+  releaseId: "rel_abc123",
+  userToken: jwtFromYourBackend, // obtained from your own auth flow
+});
+```
+
+You can also set or replace the token after construction — useful when the token
+is fetched asynchronously or rotated:
+
+```typescript
+await client.setToken(newJwt, expiresAtUnixMs);
+await client.setRefreshToken(refreshJwt); // optional
+await client.logout(); // clears stored tokens
+```
+
+<Aside type="danger" title="userToken must be an access token">
+  `userToken` is sent verbatim as the `Authorization: Bearer` value on every
+  request — the client has no built-in refresh logic (`SimpleTokenStorage`'s
+  refresh-token slot is a no-op). It must be a short-lived **access token**,
+  never the long-lived refresh token returned by `POST /embed/login`. See
+  "Headless external-user login" below for how to obtain one.
+</Aside>
+
+#### Headless external-user login (no embed script)
+
+If you're driving `@divinci-ai/client` directly (no `embed-script.js`) and want
+to identify an external user against a workspace API key, exchange credentials
+in two hops — this is the same flow the embed script performs internally,
+documented here for headless/backend-proxied integrations:
+
+**1. Backend calls `POST /embed/login`** with the workspace API key and the
+caller's identity. This step must run server-side — it takes your secret API
+key.
+
+```jsonc
+// Request
+{
+  "apikey": "divinci_key_...",
+  "userId": "user_123",
+  "membershipTier": "free",
+  "username": "Ada Lovelace"
+}
+
+// Response
+{
+  "refreshToken": "eyJhbGciOi...",       // long-lived (7 days) — NOT a valid Authorization value
+  "refreshExpiresAt": "2026-07-08T00:00:00.000Z",
+  "tierAssigned": "free"                  // resolved server-side; ignore any tier the caller requested
+}
+```
+
+**2. Backend (or a browser-direct client) calls `POST /embed/validate-login`**
+with the refresh token plus the calling origin and release, and gets back a
+short-lived access token:
+
+```jsonc
+// Request
+{
+  "refreshToken": "eyJhbGciOi...",
+  "origin": "https://your-app.example.com",
+  "releaseId": "rel_abc123"
+}
+
+// Response
+{
+  "valid": true,
+  "accessToken": "eyJhbGciOi...",        // 30-minute lifetime — this is the userToken
+  "userInfo": { "user_id": "...", "nickname": "Ada Lovelace", "picture": null },
+  "tierConfig": { "tier": "free", "limits": { /* ... */ }, "usage": { /* ... */ }, "remaining": { /* ... */ } }
+}
+```
+
+**3. Pass the `accessToken` as `userToken`** to the client SDK:
+
+```typescript
+const client = new DivinciClient({
+  releaseId: "rel_abc123",
+  userToken: accessTokenFromValidateLogin,
+});
+```
+
+<Aside type="caution" title="30-minute expiry">
+  The access token expires in 30 minutes. Using `userToken` (the flow above)
+  creates a `SimpleTokenStorage` internally, which does **not** auto-refresh —
+  when it expires, re-call `/embed/validate-login` with the same (still-valid,
+  7-day) refresh token and call `client.setToken()` with the new access token.
+  Do not confuse this with `POST /embed/refresh`, which mints a new
+  **refresh** token to extend the 7-day session — it does not return an
+  access token and cannot be used as `userToken`.
+
+  If instead you call `client.setRefreshToken(refreshJwt)` (skip `userToken`)
+  and set `origin` in `DivinciClientConfig`, the SDK refreshes automatically
+  on a 401 via `/embed/validate-login` — no manual re-exchange needed.
+  Automatic refresh requires `@divinci-ai/client` **0.5.0 or later**: versions
+  up to 0.4.5 posted refreshes to a nonexistent `/api/v1/auth/refresh` route,
+  which always 404'd and silently cleared the stored token.
+</Aside>
+
+<Aside type="note" title="Origin allowlisting for browser-direct integrations">
+  If step 2 runs in the browser (not proxied through your backend), the
+  calling origin must be present in the API key's `allowedOrigins` list —
+  `/embed/validate-login` rejects the exchange otherwise. Backend-proxied
+  integrations that call `/embed/validate-login` server-side still need to
+  pass the origin of the eventual browser caller, and that origin must be
+  allowlisted on the key.
+</Aside>
+
+#### Troubleshooting `{ "valid": false }`
+
+`/embed/validate-login` deliberately returns a uniform `200 {"valid": false}`
+for every failure (no oracle for attackers), so check these in order — they
+are the real causes, most common first:
+
+1. **Release ↔ API key whitelabel mismatch.** The `releaseId` must belong to
+   the **same whitelabel** as the API key that minted the refresh token. A
+   stale release id from an old workspace fails this way even though the
+   token itself is perfectly valid. Verify with
+   `GET /white-label-release/{releaseId}` — its `target` names the
+   whitelabel the release belongs to.
+2. **Origin not allowlisted.** `allowedOrigins` is a property of the **API
+   key** (not the release — you won't find it on the release object), set at
+   key creation/update in the workspace admin. The `origin` you send must
+   match an entry exactly (scheme included, case-sensitive). Local dev
+   origins like `http://localhost:5173` must be added explicitly.
+3. **Missing fields.** `refreshToken`, `origin`, and `releaseId` are all
+   required — omitting any of them fails.
+4. **Token/key state.** The refresh token is expired (7 days), the API key
+   was deactivated, or its sessions were revoked.
+
+Also note: the `membershipTier` passed to `/embed/login` must match one of
+the whitelabel's configured embed-tier slugs ("Invalid tier" 400s list the
+`availableSlugs`). Tiers are defined per whitelabel by the workspace admin —
+if your membership levels aren't in the list, ask the workspace owner to add
+matching tier slugs.
+
+### 2. External user (API key + caller identity)
+
+For embedded or partner integrations, authenticate with an API key and attach the
+end user's identity so usage and quotas attribute to the right person.
+
+```typescript
+const client = new DivinciClient({
+  releaseId: "rel_abc123",
+  apiKey: "divinci_key_...",
+  externalUser: {
+    userId: "user_123",          // required: your system's user id
+    email: "user@example.com",
+    name: "Ada Lovelace",
+    membershipTier: "premium",
+    metadata: { company: "Acme Inc" },
+  },
+});
+
+// Or update the identity later
+client.setExternalUser({ userId: "user_456" });
+```
+
+### 3. Custom token storage
+
+For full control over where tokens live and how they refresh, implement the
+`TokenStorage` interface and pass it as `tokenStorage`:
+
+```typescript
+import { DivinciClient, type TokenStorage } from "@divinci-ai/client";
+
+const storage: TokenStorage = {
+  async getToken() {
+    return localStorage.getItem("divinci_token");
+  },
+  async setToken(token, expiresAt) {
+    localStorage.setItem("divinci_token", token);
+  },
+  async clearToken() {
+    localStorage.removeItem("divinci_token");
+  },
+  async getRefreshToken() {
+    return localStorage.getItem("divinci_refresh");
+  },
+  async setRefreshToken(token) {
+    localStorage.setItem("divinci_refresh", token);
+  },
+};
+
+const client = new DivinciClient({ releaseId: "rel_abc123", tokenStorage: storage });
+```
+
+<Aside type="caution" title="Anonymous chat">
+  If you don't need to identify users at all, `client.chat.createAnonymous()`
+  opens an ephemeral thread against a Release that permits anonymous chat — no
+  token required. See the [Chat](/client/chat) page.
+</Aside>
+
+<Aside type="note" title="Landing pages use a different credential">
+  A public, no-login **landing-page chat** (a marketing page or embedded widget)
+  authenticates with neither an API key nor a user token — it uses a shared
+  **landing-page HMAC** signed by a server-side proxy. Putting a `divinci_…` API
+  key there is a common mistake and is always rejected. See
+  [Deploy to Cloudflare Workers](/guides/cloudflare-workers/).
+</Aside>
+
+## Checking authentication state
+
+<Tabs>
+  <TabItem label="Client SDK">
+    ```typescript
+    const signedIn = await client.isAuthenticated();
+    const keyValid = await client.validateApiKey();
+    ```
+  </TabItem>
+  <TabItem label="Server SDK">
+    ```typescript
+    const keyValid = await divinci.validateApiKey();
+    ```
+  </TabItem>
+</Tabs>
+
+## Security best practices
+
+1. **Never commit secrets** — load API keys from environment variables.
+2. **Keep server keys server-side** — browsers get user tokens, not API keys.
+3. **Use separate keys per environment** — dev, staging, and production.
+4. **Scope keys** — issue workspace-scoped keys with `divinci.apiKeys.create()` (see [API Keys](/server/api-keys)).
+5. **Rotate regularly** — `divinci.apiKeys.rotate()` swaps a key without downtime.
+6. **Prefer short-lived user tokens** — they limit blast radius if leaked.

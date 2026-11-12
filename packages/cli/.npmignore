@@ -1,0 +1,15 @@
+# NOTE: When package.json sets the `files` allowlist, npm ignores this
+# file entirely for anything inside the allowlisted directories. So we
+# can't use .npmignore to strip `dist/tsconfig.tsbuildinfo` -- that is
+# handled by setting `tsBuildInfoFile` in tsconfig.json to point outside
+# the `dist/` tree, keeping the build cache out of the tarball by
+# construction rather than by post-hoc exclusion.
+#
+# This file remains only to exclude things that might sneak into the
+# package root without being in the `files` allowlist (editor files,
+# OS droppings). Everything inside `dist/` must be filtered via
+# tsconfig or a prepack hook, not via this file.
+
+.DS_Store
+Thumbs.db
+*.swp

@@ -1,0 +1,35 @@
+---
+/**
+ * Thin wrapper around Starlight `<Tabs>` for multi-language SDK examples.
+ *
+ * Use in MDX with `<TabItem>` children. Standard tab labels (use only those that
+ * apply to the snippet):
+ *   Rust · Python · TypeScript · JavaScript · cURL · CLI
+ *
+ * @example
+ * <SdkCodeExample syncKey="chat-create">
+ *   <TabItem label="TypeScript">
+ *     ```typescript
+ *     const thread = await client.chat.create();
+ *     ```
+ *   </TabItem>
+ *   <TabItem label="cURL">
+ *     ```bash
+ *     curl -X POST ...
+ *     ```
+ *   </TabItem>
+ * </SdkCodeExample>
+ */
+import { Tabs } from "@astrojs/starlight/components";
+
+interface Props {
+  /** Persist the selected tab across pages (Starlight synced tabs). */
+  syncKey?: string;
+}
+
+const { syncKey } = Astro.props;
+---
+
+<Tabs syncKey={syncKey}>
+  <slot />
+</Tabs>

@@ -1,0 +1,60 @@
+---
+title: Transcripts
+description: Manage conversation transcripts and their messages.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`divinci.transcripts` manages conversation transcripts in a workspace — listing
+them, reading them, and adding messages.
+
+## Creating and reading transcripts
+
+```typescript
+const transcript = await divinci.transcripts.create({
+  workspaceId: "ws_123",
+  releaseId: "rel_abc123", // optional
+});
+
+const { data } = await divinci.transcripts.list("ws_123", { limit: 20 });
+const one = await divinci.transcripts.get(transcript._id);
+
+await divinci.transcripts.delete(transcript._id);
+```
+
+## Adding a single message
+
+```typescript
+const message = await divinci.transcripts.addMessage(transcript._id, {
+  role: "user",
+  content: "How do I reset my password?",
+});
+```
+
+## Batch ingestion (removed)
+
+<Aside type="caution">
+  `ingestBatch` was **removed on 2026-08-07**. The method throws, and the
+  endpoint answers `410 Gone`.
+
+  It was the only write path that skipped the message pipeline: it bypassed
+  moderation, de-identification, RAG retrieval and inference, leaving PII
+  redaction to the caller. Because it accepted a caller-supplied message role,
+  a `system` message written this way was replayed to the model as a real
+  instruction on every later turn.
+
+  There is no drop-in replacement. If you run inference yourself, persist it
+  yourself. To have Divinci generate and record a turn, use
+  [`addMessage`](#adding-a-single-message), which runs the full pipeline.
+</Aside>
+
+## Method reference
+
+| Method | Description |
+|--------|-------------|
+| `list(workspaceId, options?)` | Paginated transcripts. |
+| `get(transcriptId)` | Fetch a transcript. |
+| `create(options)` | Create a transcript (`workspaceId`, optional `releaseId`). |
+| `addMessage(transcriptId, options)` | Append a single message. |
+| `ingestBatch(options)` | **Removed 2026-08-07** — throws. See above. |
+| `delete(transcriptId)` | Delete a transcript. |

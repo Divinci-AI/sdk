@@ -1,0 +1,60 @@
+---
+title: Voice & Audio
+description: Text-to-speech, transcription, speaker diarization, voice cloning and voiceprints — every vendor Divinci can run them on.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import ToolCatalogTable from "../../../components/ToolCatalogTable.astro";
+
+## Text-to-speech
+
+<ToolCatalogTable type="Audio/TextToSpeech" />
+
+`cloudflare-aura-2` is the default. `browser-local` uses the listener's own
+device — no synthesis bill and no audio leaving the browser, at the cost of
+whatever voices that device happens to have.
+
+<Aside type="caution" title="`@cf/deepgram/aura-2-en` is a Cloudflare call, not a Deepgram one">
+The default voice is Deepgram's *model* hosted on Cloudflare Workers AI. It
+consumes **no Deepgram credits** and needs no Deepgram key, despite the
+`deepgram` in the model string. `deepgram-tts` is the separate tool that really
+does call `api.deepgram.com`. Switching the default to it changes whose bill the
+audio lands on and nothing a listener can hear.
+</Aside>
+
+## Transcription
+
+<ToolCatalogTable type="Audio/Transcription" />
+
+Whisper on Workers AI is the default; Deepgram Nova 3 and OpenAI's hosted
+Whisper are BYOK alternatives. Speech-to-text has a fallback router, so a
+provider failing mid-job falls through rather than losing the job.
+
+## Speaker diarization
+
+<ToolCatalogTable type="Audio/SpeakerDiarization" />
+
+Diarization answers *who spoke when*, and runs alongside transcription rather
+than instead of it. Pyannote is available both on Divinci's infrastructure and
+on your own key.
+
+## Voice cloning & voiceprints
+
+<ToolCatalogTable type="Audio/VoiceClone" />
+<ToolCatalogTable type="Audio/Voiceprint" />
+
+A **voice clone** synthesises new speech in a given voice. A **voiceprint**
+identifies a speaker across recordings. They are different capabilities with
+very different consent implications.
+
+<Aside type="danger" title="Both need the speaker's permission, not just their audio">
+Cloning a voice from a recording you have is technically easy and, in a growing
+number of jurisdictions, unlawful without explicit consent. Voiceprints are
+biometric identifiers and attract biometric-privacy law on their own terms.
+Neither is a place to move fast.
+</Aside>
+
+## See also
+
+- [Voice, Phone & SMS](/guides/voice-phone/)
+- [Recall.ai connector](/cli/connectors/recall-ai/) — meeting capture with transcripts.

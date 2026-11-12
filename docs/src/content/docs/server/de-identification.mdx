@@ -1,0 +1,241 @@
+---
+title: "De-Identification (PII Redaction)"
+description: "Strip personal information from user messages before they are stored, retrieved against, moderated, or sent to a model — the HIPAA / GDPR / PCI control on a Release."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+De-identification detects personal information in an end user's message and
+removes it **before the message is stored, used for retrieval, moderated, or
+sent to a model**. It is the control you reach for when a Release will handle
+health, financial, or otherwise regulated content, and it is off by default.
+
+It is configured per Release on the `deIdentification` object, and it is one of
+three Safety controls — the other two, which **block** and **escalate** rather
+than rewrite, are on [Safety: Moderation & Flaggers](/server/safety/).
+
+## Where it runs
+
+Position is the whole point: de-identification is the **first** step of the send
+path, ahead of everything that could otherwise persist or transmit the original.
+
+```
+user message
+   │
+   ├─▶ 1. de-identify          ← original text ends here
+   │
+   ├─▶ 2. RAG retrieval        ┐
+   ├─▶ 3. moderation           ├─ all operate on the redacted text
+   ├─▶ 4. model generation     │
+   └─▶ 5. stored transcript    ┘
+```
+
+Retrieval is queried with the redacted text, moderators never see the original,
+and what lands in the transcript is the redacted form.
+
+<Aside type="caution" title="The transformation is one-way">
+The original text is **discarded, not archived**. Nothing in the pipeline writes
+it to storage, so a redacted message cannot be un-redacted later — by you, by
+Divinci, or by a subpoena. That is deliberate, and it is what lets a redacted
+transcript fall outside the scope of the regulation that motivated turning this
+on. Plan any workflow that needs the raw text (manual review, dispute
+resolution) around its absence.
+</Aside>
+
+## Enabling it
+
+Set it through the SDK, which works on drafts and published Releases alike:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  deIdentification: {
+    enabled: true,
+    engine: "presidio",
+    strategy: "redact",
+    piiCategories: ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN", "MEDICAL_RECORD"],
+    preserveContext: true,
+  },
+});
+```
+
+There is also a dedicated endpoint, useful when you would rather not read the
+release first. The two release states take different body shapes:
+
+```bash
+# PUBLISHED release — the body IS the config object, and this route
+# refuses drafts ("Release is a draft"). Bumps the release's minor version.
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/deidentification \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "enabled": true,
+    "engine": "presidio",
+    "strategy": "redact",
+    "piiCategories": ["PERSON","EMAIL_ADDRESS","PHONE_NUMBER","US_SSN","MEDICAL_RECORD"],
+    "preserveContext": true
+  }'
+
+# DRAFT release — nested under `deIdentification` in the full draft body.
+curl -X POST https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{ "...full draft body...", "deIdentification": { "enabled": true, "...": "..." } }'
+```
+
+<Aside type="note" title="Omitting it still preserves it">
+`releases.updateInWorkspace()` carries the stored `deIdentification` forward on
+every save, so an update that does not mention it leaves a configured Release
+untouched. Passing a value overrides that carry-forward — which older clients
+could not do, and silently discarded when asked.
+</Aside>
+
+## Configuration
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | Master switch |
+| `engine` | `presidio` \| `stanford` \| `obi-roberta` | `presidio` | See [Engines](#engines) — one of these does not work |
+| `strategy` | `redact` \| `replace` \| `hybrid` | `redact` | See [Strategies](#strategies) |
+| `piiCategories` | `PIICategory[]` | `[]` | **Empty = detect everything** |
+| `preserveContext` | boolean | `true` | Keep sentences semantically readable after substitution |
+| `customPatterns` | `{name, pattern, replacement}[]` | — | Domain-specific regexes on top of the engine's detectors |
+| `storeOriginal` | boolean | `false` | Accepted and stored — but see the caveat below |
+| `failClosed` | boolean | `true` | **Not settable via the API** — see [Failure behaviour](#failure-behaviour) |
+
+The request body is validated **strictly**: an unrecognised key is rejected with
+`De-Identification Config validation failed at <key>`, rather than being ignored.
+Omitted keys fall back to the defaults above rather than to the Release's current
+values, so send the whole object every time.
+
+<Aside type="caution" title="`storeOriginal` does not archive anything">
+The flag is accepted, persisted on the config, and deliberately excluded from
+workspace export — but no code path writes the original text anywhere. It cannot
+currently be used to build a reversible audit trail, and should be treated as
+inert rather than as a retention switch. The pipeline's discard of the original
+(above) is unconditional.
+</Aside>
+
+## Engines
+
+| Engine | Status |
+| --- | --- |
+| `presidio` | ✅ Default. Microsoft Presidio; the most accurate detector |
+| `stanford` | ✅ Available |
+| `obi-roberta` | ⛔ **Accepted by validation, but not implemented** |
+
+If the configured engine fails at request time, the other working engine is tried
+as a fallback — `presidio → stanford`, and `stanford → presidio`.
+
+<Aside type="danger" title="`obi-roberta` will break every message on the Release">
+`obi-roberta` is a member of the type union and passes config validation, so you
+can save it without any error. There is no engine registered under that name, so
+at request time the lookup throws `Unknown de-identification engine`. It also has
+no fallback chain entry, so nothing recovers — and because the failure mode is
+fail-closed (below), **every message on the Release is rejected with a 503** for
+as long as it is selected. Use `presidio` or `stanford`.
+</Aside>
+
+## Strategies
+
+**`redact`** (default) replaces each detected entity with a type token. Nothing
+false is introduced, which is why it is the safe default:
+
+```
+Hi, I'm John Smith. My email is john@example.com and my SSN is 123-45-6789.
+→ Hi, I'm [PERSON]. My email is [EMAIL_ADDRESS] and my SSN is [US_SSN].
+```
+
+**`replace`** substitutes realistic synthetic values. The sentence stays natural,
+which can help a model answer well — at the cost of putting plausible-but-false
+details in the transcript:
+
+```
+→ Hi, I'm Michael Johnson. My email is michael.johnson@email.com and my SSN is 987-65-4321.
+```
+
+**`hybrid`** replaces ordinary entities with synthetic values but keeps hard
+tokens for the most sensitive categories (SSN, credit card, passport, medical
+record).
+
+<Aside type="caution" title="`hybrid` is not the same on both engines">
+Presidio implements the genuine mix described above. Stanford treats `hybrid`
+exactly like `redact`. So a Release that fails over from Presidio to Stanford
+changes redaction *style* mid-incident — safely (Stanford is the more
+conservative of the two), but visibly. If consistent output matters more than
+availability, pin `redact`, which both engines implement identically.
+</Aside>
+
+## PII categories
+
+Leaving `piiCategories` empty detects **all** categories — the safe default.
+Narrow it only when a category causes false positives that harm answers (in
+practice `DATE_TIME`, `LOCATION`, and `NRP` are the usual culprits on
+domain-specific content).
+
+| Group | Categories |
+| --- | --- |
+| Identity | `PERSON`, `EMAIL_ADDRESS`, `PHONE_NUMBER`, `AGE`, `NRP`, `SOCIAL_MEDIA`, `GAMING_ID` |
+| Government ID | `SSN`, `US_SSN`, `US_PASSPORT`, `US_DRIVER_LICENSE`, `ID_NUMBER`, `CERTIFICATE` |
+| Financial | `CREDIT_CARD`, `IBAN_CODE`, `ACCOUNT_NUMBER`, `CRYPTO_ADDRESS` |
+| Health | `MEDICAL_RECORD`, `HEALTH_PLAN`, `BIOMETRIC`, `PHOTO` |
+| Location & time | `LOCATION`, `DATE_TIME` |
+| Technical | `IP_ADDRESS`, `URL`, `DEVICE_ID`, `VEHICLE_ID` |
+
+The set covers the HIPAA Safe Harbor identifiers plus modern ones (crypto
+addresses, social handles, device ids) that predate no regulation but leak just
+as effectively.
+
+## Failure behaviour
+
+When the engine errors or is unreachable, the Release **fails closed**: the
+message is rejected with a `503` carrying
+`reason: "DE_IDENTIFICATION_UNAVAILABLE"` and a message telling the user to
+retry shortly. Nothing is stored and nothing reaches the model.
+
+This is the only correct default for a redaction feature — the alternative is
+passing the unredacted original through at exactly the moment the safety net is
+down — but it has a real operational consequence worth stating plainly:
+
+<Aside type="danger" title="If the redaction service is down, the Release stops answering">
+A de-identification-enabled Release depends on the engine being reachable. Cold
+starts count: the client's timeout is `PRESIDIO_TIMEOUT_MS` (default 30s), and
+the engine should be run with a warm minimum instance so a scale-from-zero does
+not read as an outage. Budget for this before enabling on a
+high-traffic Release, and alert on the 503 rather than discovering it through
+users.
+</Aside>
+
+`failClosed: false` exists in the type as a legacy fail-open escape hatch, but
+the API's config schema does not accept the key and rejects it outright — so in
+practice **every Release is fail-closed** and the unsafe mode cannot be turned on
+through the API. Treat the field as documentation of intent, not as a knob.
+
+A failure is logged as `[DE-ID-FAILURE]` and a successful redaction as
+`[DE-ID-SUCCESS]` with entity counts by type. Neither ever logs the text — not
+even the engine's error string, which can echo the original.
+
+## Gotchas
+
+- **Enabled is not the same as working.** Saving a config validates its *shape*,
+  never that the engine is reachable. The first evidence of a bad engine choice
+  is user-visible 503s, so send a test message immediately after enabling.
+- **It is per Release, not per workspace.** Forking a Release carries the config
+  forward; creating a new one does not. A second Release against the same data is
+  unprotected until you configure it too.
+- **Redaction happens before retrieval.** If your RAG corpus is keyed on terms
+  the redactor removes (names, dates, locations), recall drops once this is on.
+  Test retrieval quality with de-identification enabled, not before.
+- **The transcript is the redacted text.** Anything downstream that reads
+  transcripts — QA suites, fine-tuning exports, analytics — sees redacted
+  content. That is usually the point, but it means training data collected after
+  enabling differs in kind from data collected before.
+- **`preserveContext` affects quality, not safety.** It keeps substitutions
+  grammatical so the model still understands the sentence; it never widens what
+  is detected.
+
+## Related
+
+- [Safety: Moderation & Flaggers](/server/safety/) — the other two Safety
+  controls, and where de-identification sits in the send pipeline relative to them
+- [Security & Abuse Protection](/server/security/) — the gate, rate limits, and
+  spend caps that protect a public Release
+- [Releases](/server/releases/) — the Release object these settings live on

@@ -1,0 +1,130 @@
+---
+title: x402 Payments
+description: Pay for premium MCP tool calls with the x402 protocol — automatically or manually.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Some MCP tools charge per call. When a priced tool is invoked without payment, the
+server responds with **402 Payment Required** and the SDK raises a
+`PaymentRequiredError`. You can let the SDK pay automatically (**autopay**) or
+catch the error and run your own flow (**manual**).
+
+## The wallet interface
+
+Both paths need a wallet implementing `McpWallet` — it **signs** a payment and
+returns a receipt; it does not broadcast (the facilitator settles server-side).
+
+```typescript
+import { type McpWallet } from "@divinci-ai/mcp";
+
+const wallet: McpWallet = {
+  async getAddress() {
+    return "0xYourWalletAddress";
+  },
+  async pay(details) {
+    // details: { amountUsd, amountMicro, recipient, network, toolName, facilitatorUrl }
+    const signed = await mySigner.signTransferAuthorization(details);
+    return {
+      transactionHash: signed.hash,
+      network: details.network,
+      recipient: details.recipient,
+      amountUsd: details.amountUsd,
+      timestamp: Date.now(),
+      signature: signed.signature,
+    };
+  },
+};
+```
+
+## Path A — Autopay
+
+Configure `payment` on the client with a wallet and a per-call cap. The SDK
+intercepts every 402, pays, and retries — `callTool` resolves with the eventual
+success result. Calls that would exceed `maxPaymentUsd` raise
+`PaymentRequiredError` instead of paying.
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+  payment: {
+    autoPayment: true,
+    maxPaymentUsd: 1.0, // hard cap per call
+    network: "base",
+    wallet,
+  },
+});
+
+await mcp.connect();
+
+// No per-call awareness needed — the SDK pays + retries automatically.
+const result = await mcp.tools.callTool("advanced_search", { query: "luxury watches" });
+console.log(result.content);
+```
+
+<Aside type="caution" title="Always cap spend">
+  Set `maxPaymentUsd`. Without it, an agent in a loop could pay repeatedly. The
+  cap turns an over-budget call into a catchable error.
+</Aside>
+
+You can also attach or change payment config after construction:
+
+```typescript
+mcp.tools.setWallet(wallet);
+mcp.tools.setPaymentOptions({ autoPayment: true, maxPaymentUsd: 0.5 });
+```
+
+## Path B — Manual
+
+Leave `autoPayment` off (or omit `payment`) and handle the error yourself — useful
+when you want a user to approve the spend, or the wallet lives elsewhere.
+
+```typescript
+import { McpClient, PaymentRequiredError } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({ serverUrl: "https://mcp.divinci.app" });
+await mcp.connect();
+
+async function callWithApproval(name: string, args: Record<string, unknown>) {
+  try {
+    return await mcp.tools.callTool(name, args);
+  } catch (err) {
+    if (!(err instanceof PaymentRequiredError)) throw err;
+
+    const { amountUsd, network, toolName } = err.paymentDetails;
+    const ok = await confirmWithUser(`Pay $${amountUsd.toFixed(2)} on ${network} for ${toolName}?`);
+    if (!ok) throw new Error("User declined payment");
+
+    // Retry this call with a one-off autopay override
+    return await mcp.tools.callTool(name, args, {
+      payment: { autoPayment: true, maxPaymentUsd: amountUsd, network, wallet },
+    });
+  }
+}
+
+const result = await callWithApproval("advanced_search", { query: "luxury watches" });
+```
+
+## `PaymentRequiredError`
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `paymentDetails.amountUsd` | `number` | Required amount in USD. |
+| `paymentDetails.recipient` | `string` | Wallet that must receive payment. |
+| `paymentDetails.network` | `string` | `"base"` or `"base-sepolia"`. |
+| `paymentDetails.toolName` | `string` | The tool that requires payment. |
+| `paymentDetails.facilitatorUrl` | `string` | Settlement facilitator endpoint. |
+
+## Discovering price up front
+
+```typescript
+const priced = (await mcp.tools.listTools()).filter((t) => t.pricing);
+const price = await mcp.tools.getToolPrice("advanced_search");
+```
+
+<Aside type="note">
+  Paying from a **server** (per API call, not per MCP tool) uses the server SDK's
+  own x402 surface — see <a href="/server/x402">Server x402 Payments</a>.
+</Aside>

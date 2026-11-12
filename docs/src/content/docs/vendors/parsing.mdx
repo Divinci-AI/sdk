@@ -1,0 +1,61 @@
+---
+title: Parsing & Chunking
+description: The parsers and chunkers that turn a document into chunks worth embedding — LangExtract, LiteParse, Unstructured, the record chunker and the boilerplate cleaner.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import ToolCatalogTable from "../../../components/ToolCatalogTable.astro";
+
+Chunking decides what retrieval can ever find. A parser that flattens a table
+into prose, or a chunker that splits mid-sentence, caps the quality of every
+answer downstream — no store or embedding model recovers it.
+
+## Chunkers
+
+<Aside type="note" title="Tool ids are not npm package names">
+The `@divinci-ai/...` strings in the table are Divinci's internal **tool ids**,
+the values you pass when selecting a chunker. They are not packages on npm. The
+published package is [`@divinci-ai/langextract-ts`](https://www.npmjs.com/package/@divinci-ai/langextract-ts).
+</Aside>
+
+<ToolCatalogTable type="RAG/Chunker" includeDeprecated={true} />
+
+**LangExtract** is the default for documents: it splits text on sentence
+boundaries rather than at a fixed character count, in-process and with no model
+call. It is built on Divinci's TypeScript port,
+[`@divinci-ai/langextract-ts`](https://github.com/Divinci-AI/langextract-ts), of
+Google's open-source [LangExtract](https://github.com/google/langextract).
+**LiteParse + LangExtract** is for binary documents such as PDFs:
+[LiteParse](https://github.com/run-llama/liteparse) (from LlamaIndex) parses
+layout and reading order locally, then LangExtract chunks the extracted text.
+The **record chunker** is for structured rows —
+products, records, catalog entries — where one item is one chunk and splitting
+it would be wrong. **Unstructured** is the BYOK option for teams already
+standardised on it.
+
+## Cleaners
+
+<ToolCatalogTable type="RAG/Cleaner" />
+
+Cleaning runs before chunking and removes the parts of a page that are not
+content — navigation, cookie banners, footers repeated on every page.
+
+<Aside type="tip" title="Cross-page boilerplate is detected, not guessed">
+On a crawl, text that appears on nearly every page is identified as boilerplate
+by comparison across the crawl rather than by a selector list, so it works on
+sites whose markup you have never seen. The consequence worth knowing: crawling
+a **single** page gives the detector nothing to compare against, so boilerplate
+survives. Crawl the section, not the page.
+</Aside>
+
+## Auto-fix
+
+<ToolCatalogTable type="AutoFix/SuggestionCreator" />
+
+These are the tools behind chunk-level repair — flagging chunks that look wrong
+and generating replacements — rather than part of the ingest path.
+
+## See also
+
+- [RAG Knowledge Base](/server/rag/)
+- [Search & Scraping](/vendors/search-scraping/) — what fetches the page in the first place.

@@ -1,0 +1,67 @@
+---
+title: Cloudflare R2
+description: Connect a Cloudflare R2 bucket over its S3-compatible API.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Reads objects from an R2 bucket using R2's S3-compatible API.
+
+**Shape:** credential — connectable headlessly. **Provider id:** `cloudflare_r2`.
+
+## Credentials
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `accessKeyId` | ✅ | From an R2 API token |
+| `secretAccessKey` | ✅ | Stored encrypted |
+| `endpoint` | ✅ | **Your Cloudflare account ID**, not a URL |
+| `bucket` | ✅ | |
+
+<Aside type="caution" title="`endpoint` is the account ID">
+The field is labelled *Account ID* in the web form for a reason: pass the bare
+account id and Divinci expands it to
+`https://<account-id>.r2.cloudflarestorage.com`. A full `https://…` value is
+accepted verbatim, so a wrong URL here fails as "invalid credentials" rather
+than as a bad endpoint.
+</Aside>
+
+## Connect
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/cloudflare_r2/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "credentials": {
+          "accessKeyId": "…",
+          "secretAccessKey": "…",
+          "endpoint": "<cloudflare-account-id>",
+          "bucket": "my-docs"
+        }
+      }'
+```
+
+Credentials are validated with a one-object list before they are stored.
+
+Create the token in Cloudflare with **Object Read** on the bucket; the connector
+never writes.
+
+## What gets ingested
+
+Objects under an optional key prefix (`syncFilter`), selected on the Connectors
+page. As with the other bucket providers, sync runs from the web app — the CLI
+and v1 sync routes cover `web_crawl` and `wordpress` only.
+
+## From the CLI
+
+```bash
+divinci connectors status cloudflare_r2
+divinci connectors settings cloudflare_r2 --auto-sync on --cadence 1440
+divinci connectors disconnect cloudflare_r2
+```
+
+## See also
+
+- [AWS S3](/cli/connectors/aws-s3/) · [Google Cloud Storage](/cli/connectors/google-cloud-storage/)
+- [Managing connections](/cli/connectors/managing/)

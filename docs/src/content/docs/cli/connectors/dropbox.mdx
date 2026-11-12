@@ -1,0 +1,52 @@
+---
+title: Dropbox
+description: Sync files from a Dropbox account into a Divinci RAG vector — including audio and video for transcription.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ingests files and folders from a connected Dropbox account. Unlike the pure
+document connectors, Dropbox is also a common source of **media** — the
+integration recognises audio (`.mp3 .wav .m4a .aac .flac .ogg .wma`) and video
+(`.mp4 .mov .m4v .webm .mkv .avi .wmv .flv`) so recordings can be routed through
+transcription rather than treated as opaque blobs.
+
+**Shape:** OAuth redirect. **Provider id:** `dropbox`.
+
+## Connect
+
+**Workspace → Setup → Connectors → Dropbox → Connect**, or
+`POST /api/v1/connectors/dropbox/auth` and open the returned `authUrl`.
+
+### Scopes requested
+
+`files.content.read`, `files.metadata.read`, `account_info.read`. Read-only.
+
+## What gets ingested
+
+Files you pick on the Connectors page, filtered by folder path, extension, or a
+glob-style name filter. Choose the pipeline (`rag`, or `rag` + `fine-tuning`) at
+the same time.
+
+<Aside type="caution" title="Sync is not headless for this provider">
+The CLI and v1 API sync routes accept `web_crawl` and `wordpress` only — a
+file-picker provider needs an interactive selection. Run Dropbox syncs from the
+Connectors page.
+</Aside>
+
+## Keeping it fresh
+
+Polling at the connection's cadence (15-minute floor, default daily). Dropbox is
+not one of the four push-notification providers.
+
+## From the CLI
+
+```bash
+divinci connectors status dropbox
+divinci connectors settings dropbox --auto-sync on --cadence 1440
+divinci connectors disconnect dropbox
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)

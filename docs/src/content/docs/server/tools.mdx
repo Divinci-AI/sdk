@@ -1,0 +1,299 @@
+---
+title: "Tool Catalog"
+description: "Every assistant tool option — built-in tool-loop tools, MCP tools, and Site Control actions — and how to enable each per release."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A deployed assistant can do more than generate text. Divinci's tool surface spans
+**three independent subsystems**, each with its own config and its own gate, and
+**all three are off by default**:
+
+| Subsystem | What it does | Configured via | Gate |
+| --- | --- | --- | --- |
+| **Skill/tool loop (RP1)** | In-chat tools the model calls during a send (search, fetch, RAG, email, SMS, calendar) | `Release.skillConfig` | `skillConfig.enabled` |
+| **MCP tools** | The platform's full surface exposed to external MCP/agent clients | `Release.mcpConfig` | `mcpConfig.enabled` |
+| **Site Control** | Navigate / submit forms on the embedded customer site | `Release.siteControl` | `siteControl.enabled` (THE WALL) |
+
+<Aside type="caution" title="`toolRouting` is gone — use `skillConfig`">
+Earlier versions of this page documented a `Release.toolRouting` object with
+`threshold`, `regexWeight`, `modelId` and `enabledTools`, plus a
+`TOOL_ROUTING_ENABLED` server env gate. **None of that exists any more.** Tool
+selection and the routing decision were merged into a single `skillConfig`
+object, and the env gate was removed — the release field is now the only gate.
+
+This matters because the old shape fails *silently*: the release update route
+ignores keys it does not know, so a `{"toolRouting":{...}}` body still returns
+`200` and changes nothing.
+</Aside>
+
+<Aside type="note" title="How to reach each of the three">
+The three subsystems are not equally reachable, and the difference is easy to
+trip over because the unreachable one fails silently rather than erroring.
+
+| Subsystem | CLI | SDK | API body |
+| --- | --- | --- | --- |
+| `skillConfig` | `--skills-enabled`, `--catalog-skills` | ✅ | ✅ |
+| `mcpConfig` | ❌ | ✅ | ✅ |
+| `siteControl` | ❌ | ✅ | ✅ |
+
+All three are now reachable from the SDK; only the CLI coverage is partial.
+`siteControl` was the last hold-out — it appeared in neither the SDK types nor
+the CLI, and because the release update route ignores keys it does not know, a
+`updateInWorkspace` call carrying it returned `200` and changed nothing. It is
+forwarded now. `clone` copies an existing `mcpConfig` forward but cannot set one
+fresh.
+</Aside>
+
+## Skill/tool loop (in-chat tools)
+
+**What it is.** When a chat turn shows tool intent, the send path hands the
+message to a tool-calling model that loops `call-model → execute-tool →
+feed-result` until the model answers tool-free or a safety net trips. Use it when
+you want an in-chat assistant that actually does things — searches the web,
+fetches a URL, retrieves from RAG, emails or texts the person it is talking to,
+or books a calendar appointment.
+
+Tools reach the loop from three places, all merged per turn:
+
+- **Catalog skills** — Divinci-authored integrations, attached to the workspace as
+  a `WhitelabelSkill` *instance* and then selected on the release.
+- **MCP skills** — external MCP servers you connect by OAuth or a static API key;
+  each server's tools become individually selectable.
+- **User skills** — instances owned by the *person chatting*, loaded from their
+  own account at turn time rather than from the release.
+
+### The catalog
+
+Seven integrations are registered today. `mutates` is the property that decides
+whether the loop stops for confirmation before running an action.
+
+| Skill id | Actions | Mutates | Notes |
+| --- | --- | --- | --- |
+| `web-search` | `webSearch` | ❌ | |
+| `scrape-url` | `fetchUrl` | ❌ | |
+| `rag-search` | `ragSearch` | ❌ | Backed by the release's resolved RAG vector |
+| `google-calendar` | `getAvailabilities` | ❌ | |
+| | `bookAppointment`, `cancelAppointment` | ✅ | Confirmation required |
+| `email-release` | `sendEmail` | ✅ | Self-directed — may only reach the verified chatting user |
+| `email-user` | `sendEmail` | ✅ | **User-owned only.** May address the whole workspace org |
+| `sms-release` | `sendSms` | ✅ | Self-directed |
+
+<Aside type="caution" title="`email-user` can never be release-owned">
+`email-user` resolves its recipient set from the **acting user's** identity —
+themselves plus their workspace org. Attached to a release it would run with
+whoever happens to be chatting as the actor, letting the release mail an entire
+workspace on a stranger's behalf. It is therefore refused at creation time on the
+release side (`USER_OWNED_ONLY_INTEGRATIONS`); release-owned emailing is
+`email-release`, which can only reach the chatting user.
+</Aside>
+
+Image, video and diagram generation exist in the tree but are **not registered**
+in the catalog — each still needs owner-facing provider/key configuration before
+it can be enabled. Treat them as unavailable rather than opt-in.
+
+### Enabling it
+
+One gate: `skillConfig.enabled`. There is no server env var any more.
+
+```typescript
+await client.releases.updateInWorkspace(workspaceId, releaseId, {
+  skillConfig: {
+    enabled: true,
+    maxToolIterations: 5,
+    // keyed by WhitelabelSkill INSTANCE id — create the instance first
+    catalogSkills: { "6a67afca5599956295482dfc": ["sendEmail"] },
+    mcpSkills: { "6a72d8ae5c76b78e24589e85": [] }, // [] = all of that server's tools
+    toolCallingAssistant: { id: "@cf/moonshotai/kimi-k2.7-code" },
+  },
+});
+```
+
+Or from the CLI:
+
+```bash
+divinci release update <releaseId> --skills-enabled \
+  --catalog-skills '{"6a67afca5599956295482dfc":["sendEmail"]}'
+```
+
+### `skillConfig` fields and defaults
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | The only gate. False = the loop never runs, whatever is attached |
+| `catalogSkills` | `Record<instanceId, string[]>` | `{}` | `[]` as the value = all of that skill's actions |
+| `mcpSkills` | `Record<serverId, string[]>` | `{}` | `[]` as the value = all of that server's active tools |
+| `toolCallingAssistant` | `{ id }` | the release's own assistant | Must implement native tool calling |
+| `fallbackToolCallingAssistants` | `{ id }[]` | — | Ordered retry chain; each must also be tool-capable |
+| `maxToolIterations` | number ≥ 1 | `5` | Tool-call rounds allowed in one turn |
+| `businessDisplayName` | string | — | Surfaced to the model as who its skills act for |
+
+`skillConfig` **merges** shallowly over the stored value, so sending only
+`catalogSkills` leaves `enabled` and `toolCallingAssistant` intact.
+
+### Confirmation, and why it can't be faked
+
+Any action that changes external state carries `mutates: true`, and the loop
+stops before executing it to ask the chat user. A confirmation is only accepted
+as an **HMAC-signed token the server itself issued for that transcript**, so a
+client cannot fabricate one — this closes a confirmation-bypass hole that a
+plain "confirmed: true" flag would leave open.
+
+The one documented exception is `selfDirected`: an action whose target is
+resolved server-side from the current user's verified identity and can never be
+model-chosen. Its blast radius is the person who asked, so it does not force a
+confirmation stop — which matters on surfaces that have **no way to confirm**, a
+phone call being the obvious one, where the loop would otherwise stall at
+`pending-confirmation` and the action would silently never run. `mutates` stays
+true, so an owner can still opt back into confirmation per instance.
+
+### Safety nets
+
+| Bound | Value |
+| --- | --- |
+| Tool-call rounds per turn | `maxToolIterations`, default 5 |
+| Per-tool-result size | 4000 chars |
+| Confirmation for mutating tools | Required unless `selfDirected` |
+| Tool-intent signal | Always recomputed server-side |
+
+### Gotchas
+
+- **Instance ids, not catalog ids.** `catalogSkills` is keyed by the
+  `WhitelabelSkill` **instance** id you get after attaching a skill to the
+  workspace — not by the catalog id (`web-search`, `email-release`, …). The CLI
+  rejects a value that looks like a catalog id; the API rejects an instance that
+  is not ready or belongs to another workspace. Creating an instance and
+  connecting it is covered in
+  [Provider Keys (BYOK) & Skills](/server/byok-and-skills/#skills-creating-an-instance).
+- **Enabling the loop without a tool-capable model is rejected.** If you don't
+  name a `toolCallingAssistant`, it defaults to the release's own assistant,
+  which must then support native tool calling or the save fails.
+- **The loop never fails a message.** Any error inside it — or a turn that simply
+  doesn't route — falls through to normal generation. A broken skill degrades the
+  answer; it does not 500 the chat.
+- **The client's tool-intent signal is never trusted.** It is always recomputed
+  server-side, so a crafted request cannot force routing or name a tool.
+- **A handoff outranks the loop.** Routing is sequenced: cross-release handoff
+  first, then the tool loop, then normal generation. A turn handed to another
+  release makes its own tool decisions and does not carry this one's.
+- **Enabling the loop is what makes a skill real.** Attaching skill instances
+  while `enabled` is false leaves the assistant able to *describe* actions it
+  cannot perform — the failure mode is a confident claim, not an error.
+
+## MCP tools
+
+**What it is.** The MCP server (`workers/mcp-server`) exposes ~60+ named tools
+across ~25 categories — chat, RAG, config, fine-tune, QA, analytics, terms, trust,
+and more — to external MCP/agent clients. Use `mcpConfig` when you want to expose
+some of that surface to an MCP client rather than to the in-chat model.
+
+### Enabling it
+
+```bash
+# POST, not PATCH — there is no PATCH route on releases.
+# /release/$RELEASE updates a DRAFT; a published release uses .../update
+curl -X POST https://api.stage.divinci.app/white-label/$WL/release/$RELEASE \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"mcpConfig":{
+    "enabled":true,
+    "exposedTools":["send_message","search_knowledge","get_transcript"],
+    "allowAnonymousMcp":true,
+    "maxSpendPerTokenCents":500,
+    "mcpRateLimit":{"requestsPerMinute":30,"requestsPerDay":2000}
+  }}'
+```
+
+<Aside type="caution" title="Two routes, and the published one needs a full body">
+`POST /white-label/{wl}/release/{id}` edits a **draft**. A published release is
+locked for draft edits and is updated through
+`POST /white-label/{wl}/release/{id}/update`, whose handler expects a **full**
+release document rather than a patch — which is exactly why the SDK's
+`updateInWorkspace` GETs the release and merges before saving. Prefer the SDK
+for a published release; reach for curl on drafts, or when setting a field the
+SDK does not yet forward.
+</Aside>
+
+### `mcpConfig` fields and defaults
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | The MCP gate |
+| `exposedTools` | string[] | empty = all release tools | Unknown names are **rejected** by the API |
+| `allowedScopes` | string[] | — | Restricts callable scopes |
+| `mcpRateLimit.requestsPerMinute` | number | `60` | Per-minute cap |
+| `mcpRateLimit.requestsPerDay` | number | `10000` | Per-day cap |
+| `allowAnonymousMcp` | boolean | `false` | Requires a positive `maxSpendPerTokenCents` |
+| `maxSpendPerTokenCents` | cents | `1000` ($10) | Per-token spend cap |
+
+### Gotchas
+
+- **Unknown `exposedTools` are rejected.** Listing a tool name the server doesn't
+  know fails validation (it would otherwise expose nothing).
+- **Anonymous access needs a spend cap.** `allowAnonymousMcp: true` requires a
+  positive `maxSpendPerTokenCents`.
+
+## Site Control (navigation / action tools)
+
+**What it is.** The crawler builds a `SiteManifest` of the embedded customer site;
+Site Control turns that map into executable tools — a `navigate_site` action plus
+per-form submit actions. Use it when you want the assistant to move around the
+embedded site (and, opt-in, fill and submit forms with runtime confirmation).
+
+<Aside type="caution" title="THE WALL — auto-activate ≠ auto-execute">
+  The crawl-derived `siteManifest` is auto-activated, but the untrusted crawl can
+  only *propose* capabilities — it can never *authorize* them. `deriveSiteActions`
+  returns `[]` unless `siteControl.enabled` is true. `siteControl` is the separate
+  authorization layer on top of the manifest.
+</Aside>
+
+### Enabling it
+
+```bash
+# Via the SDK:
+#   await client.releases.updateInWorkspace(wl, release, {
+#     siteControl: { enabled: true, allowedCategories: ["navigation"] },
+#   });
+# Or over the API — note POST, not PATCH:
+curl -X POST https://api.stage.divinci.app/white-label/$WL/release/$RELEASE \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"siteControl":{"enabled":true,"allowedCategories":["navigation"]}}'
+
+# Add form submission (each submit action is confirmation-gated, always):
+# -d '{"siteControl":{"enabled":true,"allowedCategories":["navigation","mutation"]}}'
+```
+
+### `siteControl` fields and defaults
+
+| Field | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `enabled` | boolean | `false` | THE WALL gate |
+| `allowedCategories` | `"navigation"` \| `"query"` \| `"mutation"` \| `"utility"`[] | `["navigation"]` | Which action categories are derived |
+| `allowList` | string[] | — | Strictly validated |
+| `blockList` | string[] | — | Strictly validated |
+
+Manifest-derived limits: navigation route enum capped at 60, max 20 form actions,
+action name length 48.
+
+### Gotchas
+
+- **Form submissions always confirm.** Site Control `mutation` / submit actions
+  carry `requiresConfirmation: true`, which config cannot disable.
+- **Sensitive fields are stripped.** Password / hidden inputs and any name matching
+  `pass`/`pwd`/`card`/`cvv`/`ssn`/`secret`/`token`/`otp`/`pin`/`account-number`/`routing`
+  never become fillable params.
+- **Cross-origin hrefs are dropped** from navigation actions.
+
+### Inspecting derived actions
+
+```typescript
+import { deriveReleaseSiteActions } from "@divinci-ai/models";
+
+// Site Control: derived actions ([] unless siteControl.enabled)
+const siteActions = deriveReleaseSiteActions(release);
+```
+
+For the skill loop there is no equivalent pure selector — which tools a release
+advertises is resolved per turn, because it merges the release's `catalogSkills`
+and `mcpSkills` with the **chatting user's** own skill instances and with live
+MCP tool discovery. Read `skillConfig` off the release to see what the release
+contributes; the rest only exists in the context of a specific turn and user.

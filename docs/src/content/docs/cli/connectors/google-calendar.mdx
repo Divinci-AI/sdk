@@ -1,0 +1,53 @@
+---
+title: Google Calendar
+description: Ingest calendar events as scheduling context for an assistant.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Ingests events from a connected Google account — meeting titles, times,
+attendees and descriptions — so an assistant can answer about what happened and
+what is coming up.
+
+**Shape:** OAuth redirect. **Provider id:** `google_calendar`.
+
+## Connect
+
+**Workspace → Setup → Connectors → Google Calendar → Connect**, or
+`POST /api/v1/connectors/google_calendar/auth` and open the returned `authUrl`.
+
+### Scopes requested
+
+`calendar.readonly` and `calendar.events.readonly`, plus `userinfo.email` and
+`userinfo.profile`. Read-only.
+
+<Aside type="note" title="Reading a calendar is not booking on one">
+This connector *ingests* events into knowledge. Letting an assistant **check
+availability and book** is a different feature — the `google-calendar` catalog
+skill in the [tool loop](/server/tools/), whose `bookAppointment` and
+`cancelAppointment` actions are marked `mutates` and stop for confirmation.
+</Aside>
+
+## What gets ingested
+
+Events in a window around now (past and upcoming), as text records. A query
+string on the connection is passed through to the Calendar API, so you can
+narrow by calendar or by the API's own parameters.
+
+## Keeping it fresh
+
+Calendar uses an `events.watch` push channel per connection, auto-renewed within
+12 hours of expiry, with polling as the fallback.
+
+## From the CLI
+
+```bash
+divinci connectors status google_calendar
+divinci connectors settings google_calendar --auto-sync on --cadence 720
+divinci connectors disconnect google_calendar
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [Tool Catalog](/server/tools/) — the booking skill.

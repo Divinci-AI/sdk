@@ -1,0 +1,233 @@
+---
+title: Tool Catalog
+description: Every tool the Divinci MCP server exposes to a connected assistant, grouped by area.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Once your assistant is [connected](/mcp/connect-assistant), it can discover and
+call the tools below. This is a reference for *what an agent can do to your
+account* — the live catalog is whatever your client's `listTools()` (or the
+client's tool menu) returns, which is filtered to your permissions and the
+features your release has enabled.
+
+<Aside type="note">
+  The exact set an assistant sees depends on your **permissions**, your
+  **subscription tier**, and which **features** the connected release enables.
+  Tools you aren't authorized for won't appear. Some tools are **premium** and
+  return HTTP 402 until paid — see [Payments](/mcp/payments).
+</Aside>
+
+## Chat & conversations
+
+| Tool | What it does |
+|------|--------------|
+| `send_message` | Send a message and get the assistant's reply (creates the transcript on first send). |
+| `get_transcript` | Read the messages in a chat. |
+| `list_transcripts` | List your chats. |
+| `thread_list` / `thread_get` | List and read conversation threads. |
+
+## Knowledge base & RAG
+
+| Tool | What it does |
+|------|--------------|
+| `search_knowledge` | Search your knowledge base for relevant chunks. |
+| `list_data_sources` | List the RAG vector targets backing a workspace. |
+| `get_document` | Read an ingested document. |
+| `rag_list_files` / `rag_file_status` | List ingested files and check ingestion status. |
+| `rag_delete_file` | Remove a file from a RAG target. |
+| `html_page_list` / `html_page_get` / `html_page_count` / `html_page_hosts` / `html_page_crawl_history` | Inspect crawled HTML pages backing a knowledge base. |
+
+## Audio & transcription
+
+| Tool | What it does |
+|------|--------------|
+| `audio_upload_prepare` / `audio_upload_finalize` | Two-step direct audio upload. |
+| `audio_upload_to_rag` | Upload audio and route its transcript into RAG. |
+| `audio_transcript_upload_url` | Get a signed URL for direct audio upload. |
+| `audio_transcript_list` / `audio_transcript_get` / `audio_transcript_status` / `audio_transcript_delete` | Manage audio transcripts. |
+| `audio_transcript_generate_rag` / `audio_transcript_list_rag_targets` | Turn transcripts into RAG content. |
+
+## Releases & configuration
+
+| Tool | What it does |
+|------|--------------|
+| `release_create` / `release_update` / `release_get` / `release_list` / `release_search` | Manage releases (your deployable assistant configurations). `release_update` also authors the referenced sub-documents inline — `threadPrefix`, `conversationStarters`, `chatDisclaimer`, `chatWelcomeMessage` and `chatCTA` (see [Chat CTAs](/guides/chat-cta/)). |
+| `release_publish` / `release_archive` | Publish or archive a release. |
+| `release_derive_theme` | Derive a chat theme from your storefront into a draft release. |
+| `site_discover` | List a site's pages (robots.txt → sitemap → sitemap index → page links). Free and read-only; creates no job. |
+| `site_export` / `site_get` | Screenshot a live URL and regenerate clean, editable HTML via a vision LLM (single-page returns HTML; multi-page via `pageUrls` from `site_discover` returns a jobId to poll). |
+| `config_get` | Read release configuration. |
+| `export_config` / `import_config` | Export or import a configuration bundle. |
+| `mcp_server_create` / `mcp_server_get` / `mcp_server_list` / `mcp_server_update` / `mcp_server_delete` | Attach and manage external MCP servers as assistant tools. |
+
+## Hosted Hermes agents
+
+| Tool | What it does |
+|------|--------------|
+| `hermes_create` | Create a hosted Hermes agent — platform (`vertex_ai/…`, `cloudflare/@cf/…`) or BYOK model, optional persona, optional `releaseId` for per-turn RAG grounding. Returns the agent's `hsk-` proxy key. |
+| `hermes_list` | List the workspace's hosted agents (model, status, enabled). |
+| `hermes_get` | Read one agent, including its `hsk-` proxy key. |
+| `hermes_chat` | Send one message to an agent and get its reply (first turn after a sleep cold-boots the container). |
+| `hermes_delete` | Delete an agent and stop its container. |
+| `hermes_proactive_set` | Configure the [proactive wake loop](/server/hermes-agents/#proactive-wake-loop) — whether it wakes, `shadow` vs `live`, when, how often (`intervalHours`), and its goals/memories. |
+| `hermes_proactive_runs` | Read recent wakes: what the agent produced, whether it was delivered, and what it cost. |
+
+## Phone billing
+
+| Tool | What it does |
+|------|--------------|
+| `phone_usage_voice` | Unbilled LiveKit voice-call usage for a workspace — calls, cost (nanoUSD), oldest unbilled call. At-cost rates, no markup. |
+| `phone_usage_sms` | Unbilled Twilio SMS/MMS usage for a workspace — messages and cost (nanoUSD). At-cost rates, no markup. |
+
+## Skills
+
+| Tool | What it does |
+|------|--------------|
+| `skill_list` / `skill_get` / `skill_create` / `skill_update` / `skill_delete` | Manage workspace skills. |
+| `skill_connect_start` / `skill_connect_finish` / `skill_disconnect` | Connect and disconnect skill integrations. |
+| `skill_for_release` | Read the skills active on a release. |
+| `skill_get_catalog` / `skill_list_catalog` | Browse the skill catalog. |
+
+## Fine-tuning & training data
+
+| Tool | What it does |
+|------|--------------|
+| `finetune_status` / `finetune_list` / `finetune_cancel` | Track and manage fine-tuning jobs. |
+| `finetune_files_copy_from` / `finetune_file_export_to_qa` | Move training files between sources and into QA. |
+| `training_data_generate` / `training_data_estimate_cost` | Generate synthetic training data and estimate its cost. |
+| `training_data_job_status` / `training_data_job_results` / `training_data_job_export` | Track and export training-data jobs. |
+
+## Quality assurance & calibration
+
+| Tool | What it does |
+|------|--------------|
+| `qa_suites_list` / `qa_suite_run` / `qa_suite_copy_from` | List, run, and copy QA suites. |
+| `qa_run_status` / `qa_run_results` | Track a QA run and read its results. |
+| `qa_calibration_*` | Submit ratings, pick winners, compute agreement, and manage calibration triples. |
+| `qa_external_run_import` / `qa_external_run_live` | Grade answers from an outside AI system, or ask it the suite's questions and grade its replies. Live runs send question text to a third party and need the suite's [external-use record](/server/external-qa/). |
+| `qa_external_runs_list` / `qa_external_run_get` / `qa_external_run_compare` | List and read external runs; compare one with another external run or a release. |
+| `qa_external_use_get` / `qa_external_use_set` | Read or record whether a suite's questions may leave Divinci. |
+| `qa_external_targets_list` / `qa_external_target_delete` | List or delete registered outside systems. Registering one takes an API key, so it is CLI and API only. |
+
+## Arena & A/B presets
+
+| Tool | What it does |
+|------|--------------|
+| `arena_preset_list` / `arena_preset_activate` / `arena_preset_update_variant` | List, activate, and edit Arena comparison presets. |
+
+## Analytics, metrics & billing
+
+| Tool | What it does |
+|------|--------------|
+| `analytics_metrics` / `analytics_trends` / `analytics_funnel` / `analytics_performance` / `analytics_experiments` | Query usage analytics across dimensions. |
+| `usage_stats` | Aggregate usage statistics. |
+| `metrics_pipeline` / `metrics_alerts` / `metrics_alert_ack` / `metrics_alert_config_set` / `metrics_alert_config_delete` | Inspect the metrics pipeline and manage alerts. |
+| `billing_report` | Pull a billing report. |
+
+## Notifications & flags
+
+| Tool | What it does |
+|------|--------------|
+| `notification_list` / `notification_count` / `notification_mark_read` | Read and triage notifications. |
+| `notification_channel_*` | Create, list, test, verify, and delete delivery channels. |
+| `notification_trigger_create` / `notification_trigger_list` / `notification_trigger_delete` | Manage notification triggers. |
+| `flagger_create` / `flagger_list` / `flagger_test` / `flagger_delete` | Manage content/safety flaggers. |
+
+## Feedback
+
+| Tool | What it does |
+|------|--------------|
+| `feedback_list` / `feedback_get` / `feedback_stats` | Read user feedback and its aggregate stats. |
+
+## Products & merchandising
+
+| Tool | What it does |
+|------|--------------|
+| `product_add` / `product_update` / `product_search` | Manage and search the product catalog. |
+| `product_merchandising_get` / `product_merchandising_set` | Read and set merchandising config. |
+| `product_prominence_pin` / `product_prominence_recompute` / `product_prominence_set_pages` | Control product prominence weighting. |
+| `product_calibration_set_cadence` | Set the product-calibration cadence. |
+
+## Style patterns
+
+| Tool | What it does |
+|------|--------------|
+| `style_pattern_create` / `style_pattern_get` / `style_pattern_list` / `style_pattern_update` | Manage tone/style rewrite rules. |
+
+## Groups & access
+
+| Tool | What it does |
+|------|--------------|
+| `group_create` / `group_get` / `group_list` / `group_delete` | Manage groups. |
+| `group_invite` / `group_remove_member` | Add and remove group members. |
+| `byok_list` | List bring-your-own-key provider credentials. |
+| `connector_list` / `connector_status` / `connector_stats` | Inspect external connectors. `connector_status` takes a `provider` (or a `connectionId`, which it resolves). |
+| `connector_sync` / `connector_sync_status` / `connector_sync_cancel` | Run a sync, read its job history, stop what's running. |
+| `connector_disconnect` | Revoke a provider's connection. Not self-recoverable — re-connecting an OAuth provider needs an interactive browser flow. |
+| `connector_web_crawl_start` | Create/update a web_crawl connector: crawl a website or sitemap into a RAG vector, optionally recurring. Pass `swapOnSuccess: true` when the vector backs a published release. |
+| `connector_wordpress_discover` | Inspect a WordPress site before connecting it — canonical URL, timezone, and every REST-exposed post type. A post type missing here is not REST-exposed, which is the usual cause of a sync that succeeds and ingests nothing. |
+| `connector_wordpress_start` | Create/update a wordpress connector: sync a WordPress install into a RAG vector, optionally recurring. Same `swapOnSuccess` rule as web_crawl. |
+
+## Terms of Service
+
+| Tool | What it does |
+|------|--------------|
+| `terms_get_for_release` | Check whether the calling identity must accept a release's Terms of Service. |
+| `terms_accept` | Record acceptance of the current ToS version. |
+| `terms_create` / `terms_update` / `terms_publish` / `terms_list` | Author and publish versioned Terms of Service. |
+
+<Aside type="caution">
+  `terms_accept` is recorded as a legal act for the authenticated identity. An
+  agent should present the terms to its human user and get explicit agreement
+  before calling it. See [Tools → Terms of Service gate](/mcp/tools#terms-of-service-gate).
+</Aside>
+
+## Memory & voiceprints
+
+| Tool | What it does |
+|------|--------------|
+| `memory_add` / `memory_search` | Store and retrieve agent memory. |
+| `voiceprint_list` / `voiceprint_get` | List and read speaker voiceprints. |
+| `tts_generate` | Generate text-to-speech audio. |
+
+## TrustBench (attested evals)
+
+| Tool | What it does |
+|------|--------------|
+| `trust_run` | Run an attested benchmark against a registered assistant. |
+| `trust_verify` | Verify a signed TrustRun manifest. |
+| `trust_list_runs` / `trust_get_run` | List and read TrustRun results. |
+| `trust_list_benchmarks` / `trust_get_benchmark` | Browse available benchmarks. |
+
+## Red teaming
+
+| Tool | What it does |
+|------|--------------|
+| `red_team_plan` | Show the red-team corpus (categories, probe counts). No probes fire. |
+| `red_team_run` | Run **one** attack category against a [deployed release](/server/red-team/). Check `measured` before citing the rate; walk categories yourself for a full sweep. |
+
+## Platform & catalog (advanced)
+
+| Tool | What it does |
+|------|--------------|
+| `divinci_api_request` | Make a raw, permission-scoped Divinci API request. |
+| `divinci_web_search` / `divinci_fetch_article` | Search the web and fetch article content. |
+| `divinci_create_rag_architecture` / `divinci_analyze_pipeline` / `divinci_list_rag_patterns` | Design and analyze RAG architectures. |
+| `divinci_*_catalog_node` / `divinci_generate_node` / `divinci_promote_node` / `divinci_test_node_sandbox` | Browse and build catalog nodes. |
+| `meta_harness_*` | Inspect the self-improvement harness loop, iterations, and proposals. |
+
+## Discovery & identity
+
+| Tool | What it does |
+|------|--------------|
+| `whoami` | Show the authenticated identity and its accessible workspaces. |
+| `workspace_search` | Search across your workspaces. |
+| `search_tools` / `list_tool_categories` | Search the tool catalog and list its categories at runtime. |
+
+<Aside type="tip">
+  Don't hard-code this list. Call `listTools()` (SDK) or read your client's tool
+  menu to get the authoritative, permission-filtered catalog at runtime — it
+  reflects new tools as they ship. See [Tools](/mcp/tools) for the programmatic
+  discovery API.
+</Aside>

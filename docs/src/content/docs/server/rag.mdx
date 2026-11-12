@@ -1,0 +1,205 @@
+---
+title: RAG Knowledge Base
+description: Create collections, upload and process documents, and search your knowledge base.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+`divinci.rag` is the server-side RAG pipeline: create a **collection** (vector
+index), upload documents into it, wait for chunking + embedding, then search. A
+Release that references the collection retrieves from it automatically during chat.
+
+## End-to-end flow
+
+<Steps>
+
+1. **Create a collection**
+   ```typescript
+   const collection = await divinci.rag.createCollection({
+     workspaceId: "ws_123",
+     name: "Product docs",
+   });
+   ```
+
+2. **Upload a document** (a `Buffer` or `Blob` plus a file name)
+   ```typescript
+   import { readFileSync } from "node:fs";
+
+   const file = readFileSync("./handbook.pdf");
+
+   const doc = await divinci.rag.uploadDocument(
+     "ws_123",
+     collection.id,
+     file,
+     "handbook.pdf",
+     { mimeType: "application/pdf" },
+   );
+   ```
+
+3. **Wait for processing** (chunking + embedding is asynchronous)
+   ```typescript
+   const ready = await divinci.rag.waitForProcessing(
+     "ws_123",
+     collection.id,
+     doc.id,
+     { timeout: 120_000, pollInterval: 5_000 },
+   );
+   ```
+
+4. **Search**
+   ```typescript
+   const results = await divinci.rag.search(
+     "ws_123",
+     collection.id,
+     "What is the refund window?",
+     { limit: 5 },
+   );
+   ```
+
+</Steps>
+
+## Collections
+
+```typescript
+await divinci.rag.listCollections("ws_123", { limit: 20 });
+await divinci.rag.getCollection("ws_123", collection.id);
+await divinci.rag.updateCollection("ws_123", collection.id, {
+  settings: { similarityThreshold: 0.55, maxChunksPerQuery: 8 },
+});
+await divinci.rag.deleteCollection("ws_123", collection.id);
+```
+
+<Aside type="note" title="Renaming">
+  `updateCollection` tunes retrieval settings; the platform does not support
+  renaming a collection through this API, so a `name` passed here is ignored.
+</Aside>
+
+Tune retrieval behavior with `updateCollectionSettings`:
+
+```typescript
+await divinci.rag.updateCollectionSettings("ws_123", collection.id, {
+  minimumSimilarity: 0.72,
+  contextPerMessage: 8,
+  embeddingModel: "gemini-embedding-001@1536",
+});
+```
+
+<Aside type="tip" title="Choosing an embedding model">
+  For large batch imports, prefer a high-RPM embedding model so parallel
+  ingestion doesn't hit rate limits. Don't mix embedding models within one
+  collection — vectors from different models live in incompatible spaces.
+</Aside>
+
+## Vector stores
+
+A collection is backed by a vector store. **Qdrant** is the default; **Pinecone
+serverless** (`pinecone-serverless`) can be chosen instead, from the web app or
+the API.
+
+```typescript
+await divinci.rag.createCollection("ws_123", {
+  name: "Product docs",
+  vectorTool: "pinecone-serverless",
+  embeddingModel: "gemini-embedding-001@1536",
+});
+```
+
+Pinecone accepts **every embedding model the platform supports** — a pooled
+index is created per dimension — so it appears anywhere Qdrant does, including
+alongside 3072-dimension models.
+
+<Aside type="note" title="You have to pick it deliberately">
+  Pinecone is not part of the automatic fallback chain used when no vector store
+  is specified. A collection only uses it if you say so.
+</Aside>
+
+<Aside type="tip" title="Writes are readable straight away">
+  Pinecone serverless is not read-your-writes: a record can be acknowledged
+  before a query will return it. The SDK settles that for you — an upsert
+  resolves only once the last written id is actually fetchable, so a file you
+  add can be searched immediately, exactly as with Qdrant.
+
+  If that settling times out it **warns and continues rather than failing**.
+  Pinecone has accepted the write at that point, so the lag is not a write
+  error, and treating it as one would mark a landed ingest as failed.
+</Aside>
+
+## Documents
+
+```typescript
+await divinci.rag.listDocuments("ws_123", collection.id, { limit: 50 });
+await divinci.rag.getDocument("ws_123", collection.id, doc.id);
+await divinci.rag.reprocessDocument("ws_123", collection.id, doc.id);
+await divinci.rag.deleteDocument("ws_123", collection.id, doc.id);
+```
+
+### Source URL backlinks
+
+Every chunk of a document can link back to its source page on the chat
+context bubble. HTML-scraped pages get this automatically at ingestion;
+assign a URL to uploads and transcripts (or correct one) with
+`setDocumentSourceUrl`:
+
+```typescript
+// Set — http(s) URLs only; anything else is rejected with a 400
+await divinci.rag.setDocumentSourceUrl("ws_123", doc.id, "https://example.com/eat-to-live");
+
+// Clear
+await divinci.rag.setDocumentSourceUrl("ws_123", doc.id, null);
+```
+
+The stored value surfaces as `sourceUrl` on the document and as a clickable
+link on every chat citation that retrieves the document's chunks.
+
+### Bulk upload
+
+```typescript
+const docs = await divinci.rag.uploadDocuments("ws_123", collection.id, [
+  { file: pdfA, fileName: "a.pdf" },
+  { file: pdfB, fileName: "b.pdf", metadata: { team: "sales" } },
+]);
+```
+
+## Searching
+
+```typescript
+// Single collection
+const hits = await divinci.rag.search("ws_123", collection.id, "return policy", {
+  limit: 5,
+});
+
+// Across multiple collections
+const merged = await divinci.rag.searchMultiple(
+  "ws_123",
+  [collection.id, otherCollectionId],
+  "return policy",
+  { limit: 8 },
+);
+```
+
+Each `RagSearchResult` carries the matched chunk text, source metadata, and a
+similarity score.
+
+## Realtime chunks (RTS API)
+
+For low-latency append + search against a vector (mem0-backed), use the chunk API:
+
+```typescript
+const appended = await divinci.rag.appendChunk("ws_123", "rag_vec_id", {
+  text: "Orders ship within 2 business days.",
+  metadata: { source: "policy" },
+});
+
+const found = await divinci.rag.searchChunks("ws_123", "rag_vec_id", {
+  query: "how fast is shipping?",
+  limit: 5,
+  minScore: 0.7,
+});
+```
+
+<Aside type="caution" title="Large synchronous uploads">
+  Synchronous embedding of very large files can exceed an edge proxy's request
+  timeout even though the work completes server-side. For files over a few
+  hundred chunks, upload without blocking and poll the document's status (or use
+  `waitForProcessing`) rather than holding one long request.
+</Aside>

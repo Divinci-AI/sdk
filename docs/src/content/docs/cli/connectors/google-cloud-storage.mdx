@@ -1,0 +1,56 @@
+---
+title: Google Cloud Storage
+description: Connect a GCS bucket with a service-account key.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Reads objects from a Google Cloud Storage bucket using a service-account key.
+
+**Shape:** credential — connectable headlessly. **Provider id:** `gcs`.
+
+## Credentials
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `projectId` | ✅ | |
+| `bucket` | ✅ | Validated by a bucket-exists check before storing |
+| `serviceAccountKey` | ✅ | The **whole service-account JSON**, as a string |
+
+<Aside type="caution" title="A service-account key is a long-lived secret">
+Mint a dedicated account with `roles/storage.objectViewer` scoped to this bucket
+and nothing else, and paste the key straight from the download — do not route it
+through a shell variable or a chat window on the way. Divinci stores it
+encrypted and never returns it from any read endpoint. Malformed JSON is
+rejected up front as `Invalid service account key JSON`.
+</Aside>
+
+## Connect
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/gcs/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n --arg key "$(cat sa.json)" '{
+        credentials: { projectId: "my-project", bucket: "my-docs", serviceAccountKey: $key }
+      }')"
+```
+
+## What gets ingested
+
+Objects under an optional prefix, selected on the Connectors page. Sync runs
+from the web app — the CLI and v1 sync routes cover `web_crawl` and `wordpress`
+only.
+
+## From the CLI
+
+```bash
+divinci connectors status gcs
+divinci connectors settings gcs --auto-sync on --cadence 1440
+divinci connectors disconnect gcs
+```
+
+## See also
+
+- [AWS S3](/cli/connectors/aws-s3/) · [Cloudflare R2](/cli/connectors/cloudflare-r2/)
+- [Managing connections](/cli/connectors/managing/)

@@ -1,0 +1,89 @@
+---
+title: Divinci Agent Skill for Claude Code
+description: Install the Divinci skill so Claude Code (and other coding agents) can expertly use the Divinci CLI, SDKs, and API while building your integration.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+The **Divinci skill** is a packaged set of instructions
+([Agent Skills](https://docs.claude.com/en/docs/agents-and-tools/agent-skills))
+that teaches a coding agent how to build with the Divinci platform — the
+`divinci` CLI, the browser and Node.js SDKs, the hosted MCP server, and the
+raw REST API. With it installed, your agent picks the right surface, uses
+correct auth patterns, and avoids the common footguns (embedding server keys
+in browsers, holding uploads open past edge timeouts, mixing embedding
+models in one RAG vector) without you pasting docs into every prompt.
+
+## What's in the package
+
+```
+divinci/
+  SKILL.md                 # concepts, auth, "which surface do I use?"
+  references/
+    cli.md                 # divinci CLI command reference + scripting patterns
+    client-sdk.md          # @divinci-ai/client — headless browser chat
+    server-sdk.md          # @divinci-ai/server — backend automation
+    mcp.md                 # hosted MCP server + @divinci-ai/mcp
+```
+
+The skill uses progressive disclosure: agents load the small `SKILL.md`
+first and pull reference files only when a task needs them, so it costs
+almost nothing in context until it's relevant.
+
+## Install
+
+<Steps>
+
+1. Download the package: [divinci-skill.zip](/divinci-skill.zip)
+
+2. Unzip it into your skills directory:
+
+   <Tabs>
+   <TabItem label="Per project">
+   ```bash
+   unzip divinci-skill.zip -d .claude/skills/
+   ```
+   </TabItem>
+   <TabItem label="All projects">
+   ```bash
+   unzip divinci-skill.zip -d ~/.claude/skills/
+   ```
+   </TabItem>
+   </Tabs>
+
+3. That's it. The skill activates automatically whenever a task involves
+   Divinci, or invoke it explicitly:
+
+   ```
+   /divinci
+   ```
+
+</Steps>
+
+<Aside type="tip">
+The skill source lives in the SDK repo at
+[`skills/divinci`](https://github.com/Divinci-AI/sdk/tree/main/skills/divinci) —
+you can also vendor it via `cp -R` from a checkout, and PRs improving it are
+welcome.
+</Aside>
+
+## Pair it with the MCP server
+
+The skill teaches the agent *how* to use Divinci; the
+[hosted MCP server](/mcp/connect-assistant) gives it *live access* to your
+account (search knowledge, upload files, inspect releases). They compose
+well:
+
+```bash
+claude mcp add divinci --transport http https://mcp.divinci.app/mcp
+```
+
+## Example prompts
+
+Once installed, prompts like these just work:
+
+- "Add a streaming Divinci chat panel to this React app for release `rel_…`."
+- "Script a CI job that uploads `docs/**/*.md` to our RAG vector and fails
+  if any file lands in `failedChunkSources`."
+- "Create a LightRAG target for our product docs and wire the release to it."
+- "Expose this release as an MCP server and connect Claude Desktop to it."

@@ -1,0 +1,197 @@
+---
+title: "TrustBench (Attested Evals)"
+description: "Run a benchmark against a Divinci assistant and get a cryptographically signed run manifest anyone can verify offline — including people who do not trust Divinci."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+TrustBench runs a benchmark against a Divinci-registered model assistant and
+signs the result with a platform Ed25519 key. The output is a **TrustRun
+manifest**: a JSON document stating what was run, against which model, with
+which harness, and what came out — signed such that a third party can check it
+without asking Divinci anything.
+
+The point is the last part. An eval score you publish is a claim; a signed
+manifest is a claim someone else can independently check. Verification runs
+**offline**, against a public key registry, using an MIT-licensed package with no
+Divinci dependencies — so "trust us" is never part of the chain.
+
+Public runs are ranked on the leaderboards at
+[divinci.ai/trustbench](https://divinci.ai/trustbench/). How a row is scored,
+what its dates mean, who judges it and how to publish your own row are in
+[TrustBench Leaderboards](/server/trustbench-leaderboards/).
+
+## Running a benchmark
+
+```bash
+divinci trust benchmarks list                    # what's available
+divinci trust run <benchmark> --model <assistantId>
+divinci trust list                               # your runs
+```
+
+`trust run` submits the run and polls to completion. Useful flags:
+
+| Flag | Effect |
+| --- | --- |
+| `--model <assistantId>` | **Required.** The Divinci assistant tool id under test |
+| `--public` | Publish to the public registry. **Default is private** |
+| `--no-wait` | Return the run id immediately instead of polling |
+| `--timeout <seconds>` | Polling timeout, default `600` |
+| `--whitelabel <id>` | Ownership context |
+| `--output json` | Machine-readable output |
+
+Over the API directly:
+
+```bash
+curl -X POST https://api.divinci.app/v1/trustbench/runs \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"benchmarkId":"<id>","modelAssistantId":"<assistantId>","visibility":"private"}'
+
+curl https://api.divinci.app/v1/trustbench/runs/$RUN_ID \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+<Aside type="caution" title="Runs are private unless you say otherwise">
+`visibility` defaults to `private`, and the CLI's `--public` is opt-in. A private
+run is fully verifiable by you, but its manifest is not served from the public
+endpoints — so nobody else can check it. Publishing is the deliberate act of
+making a claim checkable; do it when you actually want the result cited.
+</Aside>
+
+## Verifying a run
+
+Two modes, and the difference matters:
+
+```bash
+divinci trust verify <run-id>            # LOCAL — offline, independent
+divinci trust verify <run-id> --remote   # server-side; works on private runs
+divinci trust verify <run-id> --strict   # warnings become failures
+```
+
+**Local is the default, and it is the one that means something.** It fetches the
+public manifest and outputs, then verifies them offline against the well-known
+key registry — the same thing an outside party would do. `--remote` asks Divinci
+whether Divinci's own signature is good, which is useful for a private run you
+own but proves nothing to a sceptic.
+
+### Verifying from your own code
+
+The verifier is published as **`@divinci-ai/trustbench-verifier`** — MIT,
+pure TypeScript, no Divinci-internal dependencies, and it runs in browsers,
+Node, Workers, and Deno.
+
+```typescript
+import { verify } from "@divinci-ai/trustbench-verifier";
+
+const result = await verify(manifest, {
+  outputs,           // optional: raw outputs file → checks results.outputsHash
+  benchmarkContent,  // optional: raw task spec  → checks benchmark.contentHash
+});
+
+if (!result.verified) console.error(result.errors);
+```
+
+`verify()` returns a breakdown rather than a bare boolean, and the tri-state
+fields are the part to read carefully:
+
+| Field | Meaning |
+| --- | --- |
+| `verified` | Overall pass — true only if every gating check passed |
+| `signatureValid` | The manifest body was signed by a known platform key |
+| `outputsHashMatches` | `true` / `false`, or **`null` if you passed no outputs** |
+| `benchmarkContentHashMatches` | `true` / `false`, or **`null` if you passed no spec** |
+| `signedBy` | The key id that signed it |
+| `errors`, `warnings` | Detail; `--strict` promotes warnings to failures |
+
+<Aside type="caution" title="`null` is not a pass">
+Omit `outputs` and `outputsHashMatches` is `null` — the check did not run. A
+signature-only verification proves the manifest is authentic and unmodified; it
+does **not** prove the outputs you are looking at are the ones that were scored.
+To make that claim, pass the outputs file. The same applies to the benchmark
+spec: without it you have not checked that the benchmark run was the benchmark
+published.
+</Aside>
+
+## What a manifest contains
+
+A v1 manifest (`version: "1.0.0"`) carries a `runId`, `createdAt`/`completedAt`,
+and five blocks:
+
+| Block | Holds |
+| --- | --- |
+| `benchmark` | Which benchmark, its `contentHash`, and the author's signature |
+| `model` | The assistant under test and its provider |
+| `harness` | Which harness executed it, and its version |
+| `execution` | How the run was carried out |
+| `results` | Scores, plus `outputsHash` over the outputs file |
+| `signatures[]` | One or more Ed25519 blocks — `keyId`, `publicKey`, `signature` |
+
+The `signatures` array is **excluded from the signed body** before signing, so a
+manifest signs everything except its own signatures. Signing is over
+RFC-8785-style canonical JSON, which is what lets an independent implementation
+in another language reach byte-identical bytes and check the same signature.
+
+Public artifacts for a published run:
+
+```
+GET /v1/trustbench/public/runs/:id/manifest
+GET /v1/trustbench/public/runs/:id/outputs
+GET /.well-known/trustbench-keys.json        ← the public key registry
+```
+
+## Keys and rotation
+
+Each environment has **its own keypair** — `tbp-prod-001` signs production,
+`tbp-staging-001` signs staging — so a staging manifest is deliberately not
+verifiable against production keys. The registry entry for each carries
+`validFrom`, `validUntil`, and a `deprecated` flag.
+
+Rotation **appends** a new key and marks the old one deprecated rather than
+removing it, so **manifests signed under a retired key stay verifiable offline
+forever**. That property is the reason a manifest is worth publishing at all: a
+citation that expires when a key rotates is not a citation.
+
+<Aside type="note" title="Point the verifier at the right registry">
+`verify()` defaults to
+`https://api.divinci.app/.well-known/trustbench-keys.json`. Verifying a staging
+manifest means passing `wellKnownUrl` (or a `keyResolver`) explicitly, or the
+signature check fails against a registry that has never seen `tbp-staging-001`.
+</Aside>
+
+## Gotchas
+
+- **A `verified: true` with two `null`s is a weak result.** It says the manifest
+  is authentic, not that the numbers describe the artifacts in front of you.
+- **`--remote` is not independent verification.** It is Divinci checking its own
+  signature. Fine for your own private run; worthless as evidence to a third
+  party.
+- **Private runs have no public manifest.** The public endpoints will not serve
+  one, so a collaborator cannot verify a run you have not published.
+- **The benchmark's `contentHash` pins the *spec*, not the dataset behind it.**
+  Verifying it proves the published task spec was the one run.
+- **Environments do not cross-verify.** Staging keys sign staging manifests only.
+
+## Red-team benches
+
+Three of the platform benchmarks are the shared adversarial corpus, reported
+as a severity-weighted **attack success rate (lower is better)**:
+
+| Slug | Isolates |
+| --- | --- |
+| `divinci-redteam-core-v1` | All 32 probes across seven attack classes |
+| `divinci-redteam-rag-injection-v1` | Indirect injection via retrieved content only |
+| `divinci-redteam-prompt-leak-v1` | System-prompt extraction; 11 of 12 probes canary-graded, one by regex |
+
+To probe *your* deployed release (your prompt, your moderation, your RAG)
+rather than a registered model assistant, use the workspace [Red
+Teaming](/server/red-team/) surface. Same probes, different leak detector —
+your real prompt instead of a planted canary.
+
+## Related
+
+- [Red Teaming](/server/red-team/) — the same corpus, run against a
+  deployed release
+- [QA Suites](/server/qa/) — Divinci's internal scoring and regression harness,
+  which is a different tool: QA is for *your* iteration loop, TrustBench is for
+  claims you publish
+- [Arena](/server/arena/) — A/B comparison between variants

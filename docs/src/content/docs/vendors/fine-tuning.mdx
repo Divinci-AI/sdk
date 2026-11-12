@@ -1,0 +1,59 @@
+---
+title: Fine-tuning
+description: Where a Divinci fine-tune actually trains — Vertex AI Gemini, OpenAI, Cloudflare Workers AI LoRA, AWS Bedrock, Modal and Tinker.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Fine-tuners are registered as tools like everything else, but unlike the
+retrieval and audio tools they are keyed to a *base model* — the vendor decides
+which of its models are tunable, and that list moves.
+
+## Registered fine-tuners
+
+| Backend | Base models | Credentials |
+| --- | --- | --- |
+| **Google Vertex AI** | Gemini (supervised tuning) | Divinci-managed |
+| **OpenAI** | GPT-4o, GPT-4o-mini | BYOK |
+| **Cloudflare Workers AI LoRA** | Gemma 3 12B IT, Mistral Small 3.1 24B Instruct | Divinci-managed |
+| **AWS Bedrock — Claude** | Claude 3 Haiku | BYOK (AWS) |
+| **AWS Bedrock — Nova** | Nova Micro, Lite, Pro, Premier | BYOK (AWS) |
+| **Modal (Unsloth QLoRA)** | Gemma 4 27B on H100 | BYOK |
+| **Tinker** (Thinking Machines Lab) | Managed LoRA | BYOK |
+
+Cloudflare LoRA jobs train through **Hugging Face AutoTrain** and serve the
+resulting adapter on Workers AI, so a LoRA fine-tune touches two vendors even
+though it is one choice in the UI.
+
+<Aside type="caution" title="A vendor's tunable-model list is not discoverable from its API">
+Only a subset of any vendor's catalog can be tuned, the subset changes without
+notice, and the publisher APIs do not expose which models those are — a retired
+base model can keep answering inference calls while every tuning job against it
+fails. If a job fails at submission with an unhelpful error, check the base
+model is still tunable before debugging your dataset.
+</Aside>
+
+<Aside type="caution" title="BYOK-only backends refuse before they start">
+On a backend that has no Divinci-managed credential, a workspace with no
+provider key attached gets `FORBIDDEN` at job creation — not a queued job that
+fails later. Attach the key first.
+</Aside>
+
+## What actually decides the outcome
+
+The backend matters less than the data. A fine-tune reproduces the shape of what
+you feed it, so the leverage is in
+[training-data generation and flagging](/server/fine-tuning/) — the
+conversation flaggers that drop turns with no responder, duplicate dates, or
+bare URLs do more for quality than switching vendors.
+
+<Aside type="tip" title="Give a fine-tuned release a fallback">
+A release whose primary assistant is a fine-tune and which has no
+`fallbackAssistants` has nothing to fail over to when the fine-tune errors. Set
+one.
+</Aside>
+
+## See also
+
+- [Fine-tuning & Training Data](/server/fine-tuning/) — the API and workflow.
+- [Model Catalog](/guides/models/)

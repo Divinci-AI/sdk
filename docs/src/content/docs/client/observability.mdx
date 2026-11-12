@@ -1,0 +1,260 @@
+---
+title: Notifications, Analytics & Metrics
+description: Workspace notifications with custom flaggers and delivery channels, product analytics, and pipeline telemetry in the Client SDK.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Client SDK exposes three observability namespaces for AI releases:
+
+| Namespace | What it covers |
+|-----------|----------------|
+| `client.notifications` | Workspace notifications + **custom notification implementations** (flaggers, delivery channels, triggers) |
+| `client.analytics` | Product analytics: metrics, trends, A/B experiments, funnel, event ingestion |
+| `client.metrics` | Pipeline telemetry: per-node latency/error metrics + **custom alert configs** |
+| `client.feedback` | **Reading** the thumbs up/down + free-text feedback your releases received |
+
+All are workspace-scoped — pass `{ workspaceId }` per call or scope once
+with `.withWorkspace(id)`.
+
+## Notifications
+
+```typescript
+// List unread notifications
+const { docs, pagination } = await client.notifications.list(
+  { workspaceId: "ws-123" },
+  { isRead: false, limit: 10 }
+);
+
+// Counts for a badge
+const { unread } = await client.notifications.getCounts({ workspaceId: "ws-123" });
+
+// Mark read / set tags / annotate
+await client.notifications.markAsRead({ workspaceId: "ws-123", notificationId: id }, true);
+await client.notifications.setTags({ workspaceId: "ws-123", notificationId: id }, ["urgent"]);
+await client.notifications.notes({ workspaceId: "ws-123", notificationId: id })
+  .add("Followed up with customer");
+```
+
+## Custom notifications — flaggers
+
+A **flagger** is your custom notification implementation: an LLM evaluation
+that runs against chat traffic and raises a tagged notification when it flags.
+
+```typescript
+const flaggers = client.notifications.flaggers({ workspaceId: "ws-123" });
+
+const flagger = await flaggers.create({
+  title: "Refund-request detector",
+  notificationIcon: "💸",
+  notificationMessage: "A user asked about refunds",
+  notificationTags: ["refund", "urgent"],
+  assistant: "gemini-3-5-flash",   // model that runs the evaluation
+  prefix: "Does this message ask for a refund? Reply with JSON {\"flagged\": boolean}",
+  outputKeys: ["flagged"],          // fields extracted from the LLM output
+  flagInput: true,                  // include the user's message in the call
+  notifyUser: false,                // admins only
+});
+
+// Dry-run against a sample prompt (billed like a normal LLM call)
+const result = await flaggers.testRun(flagger._id, "I want my money back!");
+```
+
+`list()`, `get()`, `update()`, and `delete()` complete the CRUD surface.
+
+## Delivery channels — email & webhook
+
+Channels are *where* notifications get sent. Webhook channels turn Divinci
+notifications into calls against your own infrastructure.
+
+```typescript
+const channels = client.notifications.channels({ workspaceId: "ws-123" });
+
+const channel = await channels.create({
+  channelName: "Ops webhook",
+  deliveryMethod: "webhook",
+  details: {
+    url: "https://ops.example.com/divinci-hook",
+    method: "POST",
+    headers: {},
+    secret: "min-32-character-hmac-secret-here!!",  // HMAC-signs each delivery
+    retryPolicy: { maxRetries: 3, backoffType: "exponential", initialDelayMs: 1000, maxDelayMs: 60000 },
+    timeout: 10000,
+  },
+});
+
+await channels.test(channel._id);                  // send a test notification
+const { logs } = await channels.deliveryLogs(channel._id);  // last 100 deliveries
+```
+
+Email channels need verification before they receive real notifications:
+
+```typescript
+const email = await channels.create({
+  channelName: "On-call inbox",
+  deliveryMethod: "email",
+  details: { emailAddress: "oncall@example.com" },
+});
+await channels.sendVerificationEmail(email._id);   // recipient clicks the link
+```
+
+<Aside type="note" title="Webhook URL restrictions">
+  Webhook URLs are validated server-side — localhost, private networks, and
+  cloud metadata endpoints are rejected. The `secret` must be ≥ 32 characters
+  and is used to HMAC-sign every delivery.
+</Aside>
+
+## Delivery triggers — routing rules
+
+Triggers decide *which* notifications go to *which* channels by matching tags:
+
+```typescript
+const triggers = client.notifications.triggers({ workspaceId: "ws-123" });
+
+await triggers.create({
+  title: "Escalations to ops",
+  description: "Anything tagged urgent goes to the ops webhook",
+  triggerByDefault: false,
+  rules: [{ mode: "if-any-tag", tags: ["urgent"], action: "triggered" }],
+  channels: [channel._id],
+});
+```
+
+Rule modes: `if-any-tag`, `if-all-tags`, `if-no-tags`. Combined with flagger
+`notificationTags`, this gives you a complete custom pipeline:
+**flagger detects → tags notification → trigger matches tags → channel delivers**.
+
+## Analytics
+
+Product analytics for your AI releases — impressions, clicks, conversions,
+A/B experiments, and conversion funnel:
+
+```typescript
+const analytics = client.analytics.withWorkspace("ws-123");
+
+// Dashboard metrics with previous-period comparison
+const { current, previous } = await analytics.metrics({ timeRange: "7d" });
+
+// Daily trend line for charts
+const { trends } = await analytics.trends({ timeRange: "30d", granularity: "daily" });
+
+// Per-product performance
+const { products } = await analytics.performance({ sortBy: "ctr", limit: 25 });
+
+// A/B experiments with lift, p-value, and winner
+const { experiments } = await analytics.experiments({ status: "running" });
+
+// Conversion funnel
+const { funnel } = await analytics.funnel({ timeRange: "7d" });
+```
+
+### Custom event ingestion
+
+Record interaction events from your own UI — anonymous-allowed, so it works
+from public landing pages and embeds (max 50 events per batch):
+
+```typescript
+await analytics.trackEvents([
+  { event: "product_view",  productId: "sku-1", sessionId: "s-1" },
+  { event: "product_click", productId: "sku-1", sessionId: "s-1", position: 2 },
+  { event: "add_to_cart",   productId: "sku-1", sessionId: "s-1", price: 49.99 },
+]);
+```
+
+Accepted event types: `recommendation_impression`, `recommendations_expanded`,
+`product_view`, `product_click`, `product_hover`, `quick_view`, `add_to_cart`,
+`save_for_later`. Unknown types are counted in `rejected`, not erred.
+
+### Realtime stream
+
+```typescript
+const controller = new AbortController();
+await analytics.streamRealtime(
+  (m) => console.log("active users:", m.activeUsers),
+  { signal: controller.signal }
+);
+// server emits every ~5s and closes after 5 minutes — reconnect for longer sessions
+```
+
+## Metrics
+
+Pipeline telemetry: latency percentiles, error rates, and throughput per
+pipeline node — plus **custom alert configurations** that route threshold
+breaches to in-app, email, or webhook channels.
+
+```typescript
+const metrics = client.metrics.withWorkspace("ws-123");
+
+// Per-node metrics for a pipeline
+const result = await metrics.pipeline("pipe-1", { timeRange: "24h" });
+
+// Export as CSV (or { rows } with format: "json")
+const csv = await metrics.exportMetrics("pipe-1", { timeRange: "7d" });
+```
+
+### Custom metric alerts
+
+```typescript
+await metrics.setAlertConfig("pipe-1", {
+  nodeType: "embedding",
+  metric: "errorRate",
+  thresholds: { warning: 0.05, critical: 0.2 },
+  notificationChannels: [
+    { type: "webhook", config: { url: "https://ops.example.com/alert" } },
+    { type: "email", config: { emailAddress: "oncall@example.com" } },
+  ],
+});
+
+// Active alerts + acknowledge
+const { alerts } = await metrics.alerts("pipe-1");
+if (alerts[0]) await metrics.acknowledgeAlert("pipe-1", alerts[0].id);
+
+// List / delete configs
+const { configs } = await metrics.getAlertConfigs("pipe-1");
+await metrics.deleteAlertConfig("pipe-1", { nodeType: "embedding", metric: "errorRate" });
+```
+
+Available time ranges: `1m`, `5m`, `1h`, `24h`, `7d`, `30d`. Base node metrics:
+`count`, `avgDuration`, `p50Duration`, `p95Duration`, `p99Duration`,
+`minDuration`, `maxDuration`, `errorCount`, `errorRate`, `throughput`.
+
+## Message feedback
+
+`client.feedback` is the **read** side of message feedback — the operator's view
+of the ratings and free-text your releases received. (Consumers _submit_ feedback
+per message with [`client.chat.submitMessageFeedback`](/client/chat) — that's a separate,
+consumer-facing surface.)
+
+```typescript
+const feedback = client.feedback.withWorkspace("ws-123");
+
+// Most recent negative feedback that carries written detail
+const { docs, pagination } = await feedback.list({
+  sentiment: "negative",   // "positive" | "negative" | "neutral"
+  source: "anonymous",     // "authed" | "anonymous"
+  hasText: true,           // only records with free-text
+  page: 0,
+  limit: 25,
+});
+
+// A single record
+const record = await feedback.get({ feedbackId: docs[0].id });
+
+// Aggregate breakdown (server-computed)
+const stats = await feedback.stats({ releaseId: "rel-1" });
+// → { total, bySentiment: { positive, negative, neutral },
+//     bySource: { authed, anonymous }, withText, byRelease: [...] }
+```
+
+<Aside type="note">
+  `sentiment` buckets map to the stored value: **positive** = thumbs-up (`1`),
+  **negative** = thumbs-down (`-1`), **neutral** = free-text feedback with no
+  vote (`null`). Feedback recording is negative-leaning by design — a positive
+  vote with no comment isn't persisted as a feedback record.
+</Aside>
+
+## Related
+
+- [Submitting feedback](/client/chat) — `client.chat.submitMessageFeedback` (the consumer side)
+- [Server SDK Observability](/server/observability) — same surfaces from Node.js, plus usage & billing
+- [CLI Overview](/cli/overview) — `divinci notifications`, `divinci flagger`, `divinci analytics`, `divinci metrics`, `divinci feedback`

@@ -1,0 +1,79 @@
+{
+  "name": "@divinci-ai/cli",
+  "version": "0.9.4",
+  "description": "Official Divinci AI CLI — manage workspaces, chat, RAG, and releases from the terminal",
+  "type": "module",
+  "bin": {
+    "divinci": "./dist/bin/divinci.js"
+  },
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "import": "./dist/src/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsx bin/divinci.ts",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:integration": "DIVINCI_TEST_API_KEY=$DIVINCI_API_KEY vitest run tests/integration/",
+    "docs:generate": "tsx scripts/generate-cli-docs.ts",
+    "smoke:tarball": "./scripts/smoke-test-tarball.sh",
+    "prepublishOnly": "pnpm run build",
+    "prepack": "node ../../scripts/assert-packed-deps.mjs && node ../../scripts/assert-version-honesty.mjs"
+  },
+  "dependencies": {
+    "@divinci-ai/server": "workspace:*",
+    "@divinci-ai/types": "workspace:*",
+    "@divinci-ai/trustbench-verifier": "workspace:*",
+    "commander": "^13.0.0",
+    "chalk": "^5.4.0",
+    "ora": "^8.1.0",
+    "cli-table3": "^0.6.5",
+    "@inquirer/prompts": "^7.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.10",
+    "tsx": "^4.7.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "keywords": [
+    "divinci",
+    "ai",
+    "cli",
+    "chat",
+    "rag",
+    "workspace",
+    "release",
+    "terminal"
+  ],
+  "author": "Divinci AI <engineering@divinci.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues",
+    "email": "engineering@divinci.app"
+  },
+  "homepage": "https://divinci.ai/cli",
+  "engines": {
+    "node": ">=22.14.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "sideEffects": false
+}

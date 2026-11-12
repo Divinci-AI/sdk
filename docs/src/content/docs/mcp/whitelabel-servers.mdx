@@ -1,0 +1,135 @@
+---
+title: Release as an MCP Server
+description: Turn a Divinci white-label release into its own MCP server — a curated, tenant-scoped endpoint your consumers connect their AI assistants to.
+---
+
+import { Aside, Steps, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+Divinci has **two** MCP surfaces. Don't confuse them:
+
+| | [Account MCP](/mcp/connect-assistant) | **Release MCP** (this page) |
+|---|---|---|
+| Endpoint | `https://mcp.divinci.app/mcp` | `https://mcp.divinci.app/{whitelabelId}/mcp` |
+| Who connects | **You**, against your own account | **Your consumers**, against a release you publish |
+| Identity | Your Divinci (Auth0) login | Per-release: API key, central OAuth, or your own federated IdP |
+| Tools | Everything your permissions allow | A curated allowlist *you* choose |
+| Purpose | Operate your account | Expose a product (knowledge base + tools) to others |
+
+This page covers the **Release MCP** — turning a white-label release into a
+standalone MCP server. It's the server-publishing side; the
+[Account MCP](/mcp/connect-assistant) is the no-code client side.
+
+## What it is
+
+Every white-label release can be published as its own MCP server. Consumers
+point Claude, Cursor, or any MCP client at your release's endpoint and get a
+**curated** view: only the tools you expose, under the rate limits, billing
+mode, spend caps, and authentication you configure. It's how you ship your
+RAG-backed assistant as an MCP product to your own users.
+
+The endpoint for a release's tenant is:
+
+```
+https://mcp.divinci.app/{whitelabelId}/mcp
+```
+
+Each tenant also gets its own OAuth routes under the same prefix
+(`/{whitelabelId}/authorize`, `/token`, `/callback`, `/register`, and the
+`/.well-known/oauth-*` metadata), so compliant clients discover and complete
+sign-in automatically.
+
+## Enabling it on a release
+
+Configure MCP under the release's **MCP Server Configuration** panel (Setup →
+Release), or set the `mcpConfig` object on the release via the
+[Server SDK](/server/releases#mcp-server-config) / API.
+
+<Steps>
+
+1. **Turn on MCP for the workspace** — the master switch `mcpSettings.enabled`
+   (`POST /white-label/:whitelabelId/mcp-settings { "enabled": true }`). The
+   tenant endpoint stays off until this is set, regardless of per-release config.
+2. **Enable MCP on the release** (`mcpConfig.enabled = true`).
+3. **Pick exposed tools** — leave empty to expose all of the release's tools, or
+   select a subset to present a focused product surface. Names must match the
+   **served** tool names (e.g. `search_knowledge`) — unknown names are rejected
+   at save.
+4. **Set guardrails** — anonymous access, per-token spend cap, rate limits.
+   Enabling `allowAnonymousMcp` **requires** a positive `maxSpendPerTokenCents`
+   (anonymous access without a spend cap is rejected — it would expose your
+   wallet to the public).
+5. **Publish** the release. Consumers can now connect to
+   `https://mcp.divinci.app/{whitelabelId}/mcp`.
+
+</Steps>
+
+## Configuration reference
+
+The release's `mcpConfig` (`WhiteLabelReleaseMcpConfig`):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `boolean` | `false` | Master switch. While `false`, the tenant endpoint returns `404`. |
+| `exposedTools` | `string[]` | *(all)* | Allowlist of tool names. Empty/unset = all of the release's tools. See the [Tool Catalog](/mcp/tool-catalog). |
+| `allowedScopes` | `string[]` | *(all)* | Subset of platform scopes the release's tokens may carry. |
+| `allowAnonymousMcp` | `boolean` | `false` | Allow connections with **no** API key or OAuth token. Use only for public, read-only products. |
+| `maxSpendPerTokenCents` | `number` | `1000` | Billing safety cap per token (1000 = $10.00). Caps the damage from a leaked credential. |
+| `mcpRateLimit.requestsPerMinute` | `number` | `60` | Per-minute request ceiling. |
+| `mcpRateLimit.requestsPerDay` | `number` | `10000` | Per-day request ceiling. |
+
+<Aside type="caution">
+  `allowAnonymousMcp` removes the auth wall entirely — anyone with the URL can
+  call the exposed tools and spend against your wallet/quota up to
+  `maxSpendPerTokenCents` and the rate limits. Pair it with a tight
+  `exposedTools` allowlist and a low spend cap, or keep it off and require
+  tokens.
+</Aside>
+
+## Authentication options
+
+A tenant MCP endpoint accepts, in order:
+
+- **API key** — a `divinci_…` Bearer token from the release's workspace. Best
+  for headless/server consumers.
+- **Central OAuth** — Divinci's Auth0, via the per-tenant OAuth routes. The
+  consumer's client opens a browser sign-in.
+- **Federated IdP (your own)** — point the tenant at *your* OIDC provider so
+  your users sign in with *their* existing identity, never touching a Divinci
+  login. Configured via the whitelabel's `idpConfig`:
+
+  | Field | Description |
+  |-------|-------------|
+  | `issuerUrl` / `authorizationEndpoint` / `tokenEndpoint` / `userinfoEndpoint` / `jwksUri` | Your OIDC endpoints (or just `issuerUrl` for discovery). |
+  | `clientId` / `clientSecretRef` | Your IdP client credentials (secret stored by reference, never inline). |
+  | `scopeMapping` | Map your IdP scopes → Divinci platform scopes. |
+  | `userMapping.subjectClaim` / `emailClaim` / `groupsClaim` | Which claims identify the user and their groups. |
+  | `allowedRedirectUris` | Redirect URIs permitted in the federated flow. |
+
+  When `idpConfig` is present, the tenant's `/.well-known/oauth-authorization-server`,
+  `/authorize`, `/callback`, and `/token` routes use your IdP; otherwise they
+  fall back to central Auth0.
+
+## Billing mode
+
+A tenant MCP runs in one of two billing modes:
+
+- **`admin`** — tool usage bills to the whitelabel owner's wallet. The consumer
+  doesn't pay; you absorb cost (good for a free/freemium product).
+- **`end-user`** — usage is attributed to the connecting identity, so premium
+  ([x402](/mcp/payments)) tools are paid by the consumer per call.
+
+<Aside type="note">
+  Connecting to a tenant endpoint is the same client config as the
+  [account MCP](/mcp/connect-assistant) — just swap the URL to
+  `https://mcp.divinci.app/{whitelabelId}/mcp`. Your consumers don't need the
+  `@divinci-ai/mcp` package.
+</Aside>
+
+## Related
+
+<CardGrid>
+  <LinkCard title="Connect Your Assistant" href="/mcp/connect-assistant" description="The no-code client side — point an assistant at an MCP endpoint." />
+  <LinkCard title="Releases (Server SDK)" href="/server/releases#mcp-server-config" description="Set mcpConfig on a release programmatically." />
+  <LinkCard title="Tool Catalog" href="/mcp/tool-catalog" description="The tools you can expose." />
+  <LinkCard title="Payments" href="/mcp/payments" description="Premium pay-per-call tools via x402." />
+</CardGrid>

@@ -1,0 +1,101 @@
+---
+title: The Demo Pipeline (open source)
+description: Run the pipeline Divinci uses to build customer demos — crawl a site, build a white-label RAG demo from it, deliver a working link, with human gates on corpus approval and demo review.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+The pipeline Divinci uses to build customer demos is open source, Apache-2.0:
+
+**[github.com/Divinci-AI/divinci-demo-pipeline-oss](https://github.com/Divinci-AI/divinci-demo-pipeline-oss)**
+
+It researches a company, crawls its public site with the `divinci` CLI, builds
+a white-label RAG demo from the corpus, generates a branded landing page, and
+produces outreach — with a human gate before the money is spent and another
+before anything reaches the company.
+
+## Why you might want it
+
+It is a worked example of nearly every surface in these docs, wired together
+and running unattended: `rag crawl` scoping, vector creation, release creation
+and publishing, QA suites, teardown. If you are integrating one of those, the
+orchestrator shows it in context rather than in isolation.
+
+And it is the thing itself — if you sell to companies whose public content is
+the pitch, this builds the pitch.
+
+<Aside type="caution" title="This crawls sites that did not ask">
+The repository ships `policies/crawl-policy.md`, and it is a precondition
+rather than an appendix: robots.txt honoured, one request per second under an
+identified user-agent, a hard page budget, nothing behind auth or
+user-generated, and same-day deletion of the workspace and every derived
+vector if a company objects.
+
+Its own standard is the right one — *"would we be comfortable walking them
+through exactly how we got this data."* Nothing in the Apache-2.0 licence
+grants any right to a crawled site's content.
+</Aside>
+
+## Getting it running
+
+<Steps>
+
+1. **Install the CLI and sign in.**
+
+   ```bash
+   npm i -g @divinci-ai/cli
+   divinci auth login
+   ```
+
+   Leave `DIVINCI_API_KEY` **unset**. Workspace creation is an account-level
+   operation only the OAuth session can perform, and the CLI prefers an API key
+   over OAuth whenever one is present — so a key in your shell breaks
+   `divinci workspace create` with an error that reads like a login problem.
+
+2. **Clone and install.**
+
+   ```bash
+   git clone https://github.com/Divinci-AI/divinci-demo-pipeline-oss
+   cd divinci-demo-pipeline-oss/orchestrator && npm ci
+   ```
+
+3. **Prove the install before configuring anything.**
+
+   ```bash
+   npm test                                          # ~1,160 tests, no network
+   npm run demo -- --prospect __smoke__ --run dry    # every step, zero external calls
+   ```
+
+   The dry run walks the whole pipeline against a synthetic fixture and calls
+   nothing. If it passes, the install is good.
+
+4. **Configure your own infrastructure.** Five variables, none of which have
+   defaults — a default naming external infrastructure does not fail loudly
+   when it is wrong, it succeeds against somebody else's account. The README
+   lists them.
+
+</Steps>
+
+## If you use an AI coding agent
+
+The repository ships `AGENTS.md` and three Claude Code skills, so an agent can
+take you from clone to working demo without reverse-engineering the README:
+
+| skill | for |
+|---|---|
+| `divinci-demo-pipeline-setup` | fresh clone → verified install |
+| `divinci-demo-pipeline-run` | running against a real company |
+| `divinci-cli-release-demo` | one demo by hand, with just the CLI |
+
+They encode the things that are easy to get wrong rather than restating the
+docs — the `DIVINCI_API_KEY` trap above among them.
+
+See also the [Divinci Agent Skill](/guides/agent-skill/) for using the CLI and
+SDKs generally.
+
+## The gates are the point
+
+The loop never approves a gate. Intake writes `approvedBy: null`, so an
+unattended run prepares reviewable work and stops. Everything that spends money
+or reaches a real company sits behind a human decision — and a prospect
+classified `clinic-high` can never auto-approve, which the test suite asserts.

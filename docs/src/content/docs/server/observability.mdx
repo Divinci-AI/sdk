@@ -1,0 +1,264 @@
+---
+title: Notifications, Analytics & Metrics
+description: Server-side notifications with custom flaggers, product analytics, pipeline telemetry, and usage/billing reports.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The Server SDK exposes four observability clients for AI releases:
+
+| Client | What it covers |
+|--------|----------------|
+| `divinci.notifications` | Notifications + custom flaggers, delivery channels, triggers |
+| `divinci.analytics` | Product analytics: metrics, trends, experiments, funnel, events |
+| `divinci.metrics` | Pipeline telemetry + custom alert configurations |
+| `divinci.usage` | Workspace API-key usage stats + billing reports |
+| `divinci.feedback` | **Reading** the message feedback your releases received |
+
+All methods take the `workspaceId` as their first argument.
+
+## Notifications
+
+```typescript
+import { DivinciServer } from "@divinci-ai/server";
+
+const divinci = new DivinciServer({ apiKey: process.env.DIVINCI_API_KEY });
+
+// List unread
+const { docs } = await divinci.notifications.list("ws-123", { isRead: false });
+
+// Counts, mark-read, tags, notes
+const { unread } = await divinci.notifications.getCounts("ws-123");
+await divinci.notifications.markAsRead("ws-123", notifId, true);
+await divinci.notifications.setTags("ws-123", notifId, ["urgent"]);
+await divinci.notifications.addNote("ws-123", notifId, "Escalated to ops");
+```
+
+## Custom notification pipeline
+
+The full custom-implementation flow — flagger detects, tags the notification,
+a trigger matches the tags, a channel delivers it to your infrastructure:
+
+```typescript
+// 1. Webhook channel — where notifications land
+const channel = await divinci.notifications.channels.create("ws-123", {
+  channelName: "Ops webhook",
+  deliveryMethod: "webhook",
+  details: {
+    url: "https://ops.example.com/divinci-hook",
+    method: "POST",
+    headers: {},
+    secret: "min-32-character-hmac-secret-here!!",
+    retryPolicy: { maxRetries: 3, backoffType: "exponential", initialDelayMs: 1000, maxDelayMs: 60000 },
+    timeout: 10000,
+  },
+});
+await divinci.notifications.channels.test("ws-123", channel._id);
+
+// 2. Trigger — route "urgent" notifications to that channel
+await divinci.notifications.triggers.create("ws-123", {
+  title: "Escalations to ops",
+  description: "Urgent tags go to the ops webhook",
+  triggerByDefault: false,
+  rules: [{ mode: "if-any-tag", tags: ["urgent"], action: "triggered" }],
+  channels: [channel._id],
+});
+
+// 3. Flagger — the custom LLM detection that raises tagged notifications
+const flagger = await divinci.notifications.flaggers.create("ws-123", {
+  title: "Refund-request detector",
+  notificationIcon: "💸",
+  notificationMessage: "A user asked about refunds",
+  notificationTags: ["refund", "urgent"],
+  assistant: "gemini-3-5-flash",
+  prefix: "Does this message ask for a refund? Reply with JSON {\"flagged\": boolean}",
+  outputKeys: ["flagged"],
+  flagInput: true,
+  notifyUser: false,
+});
+
+// Dry-run before going live (billed like a normal LLM call)
+await divinci.notifications.flaggers.testRun("ws-123", flagger._id, "I want my money back!");
+```
+
+Email channels need verification: `channels.sendVerificationEmail(wsId, channelId)`
+sends a clickable link; `channels.deliveryLogs(wsId, channelId)` shows the last
+100 webhook deliveries.
+
+## Receiving a webhook
+
+Every delivery carries these headers:
+
+| Header | |
+|---|---|
+| `X-Divinci-Event` | Event name, e.g. `workflow.digest.chunking.failed` |
+| `X-Divinci-Event-ID` | Unique id for this event — **your idempotency key** |
+| `X-Divinci-Timestamp` | Unix timestamp in **seconds** |
+| `X-Divinci-Signature` | `sha256=<hex>` |
+| `User-Agent` | `Divinci-Webhooks/1.0` |
+
+### Verify the signature
+
+The signature is HMAC-SHA256 over `` `${timestamp}.${rawBody}` `` — the timestamp
+is inside the hash specifically so a captured request cannot be replayed later.
+
+```typescript
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+function verify(rawBody: string, headers: Record<string, string>, secret: string): boolean {
+  const timestamp = Number(headers["x-divinci-timestamp"]);
+  const received = headers["x-divinci-signature"];
+
+  // Reject anything older than 5 minutes — this is what makes the timestamp
+  // in the hash worth having.
+  if (!Number.isFinite(timestamp) || Math.abs(Date.now() / 1000 - timestamp) > 300) return false;
+
+  const expected = "sha256=" + createHmac("sha256", secret)
+    .update(`${timestamp}.${rawBody}`, "utf8")
+    .digest("hex");
+
+  const a = Buffer.from(expected);
+  const b = Buffer.from(received ?? "");
+  // Lengths must match before timingSafeEqual, and never compare with === —
+  // a plain comparison leaks the signature one byte at a time.
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+```
+
+<Aside type="caution" title="Verify the RAW body">
+Hash the bytes exactly as they arrived. If your framework parses JSON before you
+see it, re-serializing gives a different string — different key order, different
+whitespace — and every signature fails. In Express, capture it with
+`express.json({ verify: (req, _res, buf) => { req.rawBody = buf.toString("utf8"); } })`.
+</Aside>
+
+### Expect duplicates — use `eventId`
+
+Deliveries retry on any non-2xx response or timeout, with exponential backoff and
+jitter, up to the channel's `retryPolicy.maxRetries`. A handler that succeeded but
+answered slowly *will* be called again with the same event.
+
+**`X-Divinci-Event-ID` (also `eventId` in the body) is stable across every retry
+of the same event.** Record it and make your handler idempotent:
+
+```typescript
+if (await seen(payload.eventId)) return res.sendStatus(200); // already handled
+await handle(payload);
+await remember(payload.eventId);
+res.sendStatus(200);
+```
+
+Return 2xx as soon as you have durably accepted the event, and do the slow work
+afterwards — the delivery times out per the channel's `timeout` and a timeout is
+retried.
+
+### Payload
+
+```json
+{
+  "event": "workflow.digest.chunking.failed",
+  "eventId": "6a1f…",
+  "timestamp": 1756377600000,
+  "data": { "fileId": "…", "fileName": "report.pdf", "error": "…" }
+}
+```
+
+<Aside type="note">
+`timestamp` in the BODY is milliseconds; `X-Divinci-Timestamp` is seconds, and the
+header is the one the signature is computed over. Use the header for verification.
+</Aside>
+
+## Analytics
+
+```typescript
+// Aggregated metrics with previous-period comparison
+const { current, previous } = await divinci.analytics.metrics("ws-123", { timeRange: "7d" });
+
+// Trends / per-product performance / experiments / funnel
+const { trends } = await divinci.analytics.trends("ws-123", { granularity: "daily" });
+const { products } = await divinci.analytics.performance("ws-123", { sortBy: "ctr" });
+const { experiments } = await divinci.analytics.experiments("ws-123", { status: "running" });
+const { funnel } = await divinci.analytics.funnel("ws-123");
+
+// Record interaction events (max 50/batch)
+await divinci.analytics.trackEvents("ws-123", [
+  { event: "product_click", productId: "sku-1", sessionId: "s-1" },
+]);
+```
+
+## Metrics
+
+```typescript
+// Per-node pipeline telemetry
+const result = await divinci.metrics.pipeline("ws-123", "pipe-1", { timeRange: "24h" });
+
+// Custom alert config → webhook + email
+await divinci.metrics.setAlertConfig("ws-123", "pipe-1", {
+  nodeType: "embedding",
+  metric: "errorRate",
+  thresholds: { warning: 0.05, critical: 0.2 },
+  notificationChannels: [
+    { type: "webhook", config: { url: "https://ops.example.com/alert" } },
+  ],
+});
+
+// Active alerts + acknowledge
+const { alerts } = await divinci.metrics.alerts("ws-123", "pipe-1");
+if (alerts[0]) await divinci.metrics.acknowledgeAlert("ws-123", "pipe-1", alerts[0].id);
+
+// Export
+const csv = await divinci.metrics.exportMetrics("ws-123", "pipe-1", { format: "csv" });
+```
+
+## Usage & billing
+
+```typescript
+// Usage stats for a BYOK provider key (epoch-ms date range)
+const { stats } = await divinci.usage.apiKeyUsage("ws-123", "openai", {
+  startDate: Date.now() - 30 * 24 * 3600 * 1000,
+});
+console.log(stats.totalCost, stats.successRate);
+
+// BYOK vs Divinci-wallet billing comparison
+const report = await divinci.usage.billingReport("ws-123");
+```
+
+## Message feedback
+
+`divinci.feedback` is the **read** side of message feedback — the ratings and
+free-text your releases received. (Submission is a consumer-facing surface, not
+part of the Server SDK.)
+
+```typescript
+// Most recent negative feedback that carries written detail
+const { docs } = await divinci.feedback.list("ws-123", {
+  sentiment: "negative",   // "positive" | "negative" | "neutral"
+  source: "anonymous",     // "authed" | "anonymous"
+  hasText: true,
+  page: 0,
+  limit: 25,
+});
+
+// A single record
+const record = await divinci.feedback.get("ws-123", docs[0].id);
+
+// Aggregate breakdown (server-computed)
+const stats = await divinci.feedback.stats("ws-123", { releaseId: "rel-1" });
+// → { total, bySentiment: { positive, negative, neutral },
+//     bySource: { authed, anonymous }, withText, byRelease: [...] }
+```
+
+`sentiment` buckets map to the stored value: **positive** = thumbs-up (`1`),
+**negative** = thumbs-down (`-1`), **neutral** = free-text with no vote (`null`).
+
+## Note on `releases.getAnalytics()`
+
+`divinci.releases.getAnalytics()` is **deprecated** — there is no per-release
+analytics route in the v1 API and the method throws. Use `divinci.analytics`
+(workspace-scoped product analytics) or `divinci.metrics` (pipeline telemetry)
+instead.
+
+## Related
+
+- [Client SDK Observability](/client/observability) — same surfaces from the browser
+- [CLI Overview](/cli/overview) — `divinci notifications`, `divinci flagger`, `divinci analytics`, `divinci metrics`, `divinci feedback`

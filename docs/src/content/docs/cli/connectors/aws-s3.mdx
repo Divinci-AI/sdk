@@ -1,0 +1,78 @@
+---
+title: AWS S3
+description: Connect an S3 bucket as a Divinci data source — credentials, prefix scoping, and what the CLI can do.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Reads objects from an Amazon S3 bucket. Scope it with a key prefix so one bucket
+can serve several connections.
+
+**Shape:** credential — no browser redirect, so this one **can** be connected
+headlessly. **Provider id:** `aws_s3`.
+
+## Credentials
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `accessKeyId` | ✅ | |
+| `secretAccessKey` | ✅ | Stored encrypted; never returned by any read endpoint |
+| `region` | ✅ | Defaults to `us-east-1` if omitted |
+| `bucket` | ✅ | |
+
+<Aside type="tip" title="Give it a read-only IAM user">
+The connector only ever calls `ListObjectsV2`, `HeadObject` and `GetObject`.
+An IAM policy granting `s3:ListBucket` on the bucket and `s3:GetObject` on the
+prefix you intend to ingest is the whole requirement — there is no reason for
+this key to be able to write or delete.
+</Aside>
+
+## Connect
+
+Web app: **Setup → Connectors → AWS S3**, fill the four fields.
+
+Or over the API — the credentials are **validated against the bucket before
+anything is stored**, so a typo comes back as a `400`, not a connection that
+silently syncs nothing:
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/aws_s3/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "credentials": {
+          "accessKeyId": "AKIA…",
+          "secretAccessKey": "…",
+          "region": "us-east-1",
+          "bucket": "my-docs"
+        },
+        "syncConfig": { "autoSync": true, "syncIntervalMinutes": 1440, "syncFilter": "handbook/" }
+      }'
+```
+
+`syncFilter` is used as the **key prefix**, so `handbook/` restricts the
+connection to that folder.
+
+## What gets ingested
+
+Objects under the prefix, selected on the Connectors page. Folder-shaped keys
+are presented as folders so you can pick a subtree.
+
+<Aside type="caution" title="Sync is not headless for this provider">
+Creating the connection over the API works; *running* a sync does not. The CLI
+and v1 sync routes accept `web_crawl` and `wordpress` only — bucket providers
+need an explicit object selection. Sync from the Connectors page.
+</Aside>
+
+## From the CLI
+
+```bash
+divinci connectors status aws_s3
+divinci connectors settings aws_s3 --auto-sync on --cadence 1440
+divinci connectors disconnect aws_s3
+```
+
+## See also
+
+- [Cloudflare R2](/cli/connectors/cloudflare-r2/) · [Google Cloud Storage](/cli/connectors/google-cloud-storage/)
+- [Managing connections](/cli/connectors/managing/)

@@ -1,0 +1,125 @@
+---
+title: API Keys
+description: Issue, rotate, validate, and revoke workspace-scoped API keys.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`divinci.apiKeys` manages the API keys that authenticate access to a workspace.
+Keys are workspace-scoped, so every call takes a `workspaceId`.
+
+## Creating a key
+
+The secret is returned **once**, at creation. Store it immediately.
+
+```typescript
+const created = await divinci.apiKeys.create({
+  workspaceId: "ws_123",
+  name: "CI pipeline",
+  // optional: permissions, expiry, etc.
+});
+
+console.log(created.secret); // shown only here — save it now
+```
+
+<Aside type="danger">
+  The raw secret is only present on the `create` and `rotate` responses. It is
+  never returned again. If you lose it, rotate the key.
+</Aside>
+
+## Permissions & scopes
+
+`permissions` controls what a key may do. **Leave it empty (or omit it) and the
+key gets full access scoped to its workspace** — the right default for a trusted
+backend integration. Pass an explicit array only when you want to restrict the
+key:
+
+```typescript
+// Full access (scoped to the workspace) — empty/omitted permissions
+const full = await divinci.apiKeys.create({ workspaceId: "ws_123", name: "backend" });
+
+// Restricted: this key can read RAG and send chat messages, nothing else
+const scoped = await divinci.apiKeys.create({
+  workspaceId: "ws_123",
+  name: "chat widget",
+  permissions: ["rag:read", "transcript:write"],
+});
+```
+
+Each scope is `category:action`:
+
+| Scope | Grants |
+|-------|--------|
+| `transcript:read` / `transcript:write` | Read transcripts / **send chat messages** |
+| `rag:read` / `rag:write` | Read / manage RAG vectors and sources |
+| `release:read` / `release:write` | Read / manage releases |
+| `finetune:read` / `finetune:write` | Read / manage fine-tune jobs |
+| `whitelabel:read` / `whitelabel:write` | Read / modify workspace config |
+| `analytics:read` | Read usage analytics |
+| `byok:read` / `byok:write` / `byok:resolve` | Manage bring-your-own provider keys |
+
+<Aside type="caution" title="Chat needs transcript:write">
+  There is no separate "chat" scope — chat is gated by **`transcript:write`**. A
+  key with an explicit `permissions` array that omits it will get **403** on chat
+  calls (`chat.create` / `chat.send`). If you only need chat to work, the
+  simplest path is to leave `permissions` empty (full access) and tighten later —
+  an empty-permissions key already permits chat.
+</Aside>
+
+## Listing, reading, updating
+
+```typescript
+const { data } = await divinci.apiKeys.list("ws_123", { limit: 20 });
+const key = await divinci.apiKeys.get("ws_123", "key_abc");
+await divinci.apiKeys.update("ws_123", "key_abc", { name: "CI pipeline (prod)" });
+```
+
+## Rotating and revoking
+
+```typescript
+// Rotate: issues a new secret, invalidates the old one
+const rotated = await divinci.apiKeys.rotate("ws_123", "key_abc");
+console.log(rotated.secret);
+
+// Revoke: disable without deleting the record
+await divinci.apiKeys.revoke("ws_123", "key_abc");
+
+// Delete entirely
+await divinci.apiKeys.delete("ws_123", "key_abc");
+```
+
+## Validating a key
+
+Check a key's status without making an authenticated call:
+
+```typescript
+const result = await divinci.apiKeys.validate("divinci_key_...");
+
+if (result.valid) {
+  console.log(result.status);       // "active" | "revoked" | "expired"
+  console.log(result.workspaceId);
+  console.log(result.permissions);
+} else {
+  console.error(result.error);
+}
+```
+
+## Usage stats
+
+```typescript
+const usage = await divinci.apiKeys.getUsage("ws_123", "key_abc", "month");
+```
+
+## Method reference
+
+| Method | Description |
+|--------|-------------|
+| `list(workspaceId, options?)` | Paginated keys. |
+| `get(workspaceId, keyId)` | Fetch a key (no secret). |
+| `create(options)` | Create a key; returns the secret once. |
+| `update(workspaceId, keyId, options)` | Update key metadata. |
+| `rotate(workspaceId, keyId)` | Issue a new secret, invalidate the old. |
+| `revoke(workspaceId, keyId)` | Disable a key. |
+| `delete(workspaceId, keyId)` | Permanently delete a key. |
+| `validate(apiKey)` | Check status, workspace, and permissions. |
+| `getUsage(workspaceId, keyId, period?)` | Usage stats. |

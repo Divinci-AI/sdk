@@ -1,0 +1,11 @@
+---
+/**
+ * Footer override: Starlight's default footer + the Ask-Divinci assistant,
+ * rendered on every page so the assistant is available site-wide.
+ */
+import Default from "@astrojs/starlight/components/Footer.astro";
+import DocsAssistant from "./DocsAssistant.astro";
+---
+
+<Default><slot /></Default>
+<DocsAssistant />

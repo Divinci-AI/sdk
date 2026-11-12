@@ -1,0 +1,145 @@
+---
+title: "Spend Guard"
+description: "Check a budget before you spend, record what you spent, and surface alerts — cost enforcement for the external services your integration drives."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Spend Guard is a **client-side budget ledger** for the external services your
+integration calls: GPU jobs, video and speech generation, and direct model
+providers. You ask it whether a job is affordable, it tells you yes or no, and
+you record what the job actually cost.
+
+It is deliberately not the same thing as the platform's own billing. Divinci's
+escrow bills you for inference it runs on your behalf; Spend Guard is for spend
+**you** initiate against providers, where the guard rail has to live in your
+code because the call never passes through Divinci.
+
+## The loop
+
+Three calls, in order — check, do the work, record:
+
+```typescript
+const budget = await divinci.spendGuard.checkBudget("runpod", "user_123");
+if (!budget.allowed) throw new Error(budget.reason);
+
+const job = await startGpuJob();
+await divinci.spendGuard.record("runpod", "user_123", job.id);
+
+// later, when the real cost is known
+await divinci.spendGuard.updateCost(job.id, actualUsd);
+```
+
+`record()` writes an *estimate* at submit time so concurrent checks see the
+in-flight spend immediately; `updateCost()` replaces it with the real figure once
+the provider reports one. Skipping `updateCost()` leaves your ledger permanently
+approximate.
+
+Reporting:
+
+```typescript
+const summary = await divinci.spendGuard.getDailySummary();  // optional date arg
+// → { totalUsd, budgetLimitUsd, paused, byProvider, byUser }
+
+const alerts = await divinci.spendGuard.evaluateAlerts();
+```
+
+`summary.paused` is `true` once the day's total reaches the global limit — a
+signal for your own code to stop submitting, not something that stops anything on
+its own.
+
+## Providers and default limits
+
+`ProviderName` is a fixed set: `runpod`, `veo`, `tts`, `openai`, `anthropic`.
+
+| Limit | Default |
+| --- | --- |
+| `DAILY_GLOBAL_USD` | `50` — platform-wide daily budget |
+| `DAILY_PER_USER_JOBS` | `100` — jobs per user per day, any provider |
+| `RUNPOD_DAILY_USD` | `25` |
+| `RUNPOD_MAX_CONCURRENT` | `10` — concurrent jobs per user |
+| `RUNPOD_JOB_TIMEOUT_SEC` | `600` |
+| `VEO_DAILY_REQUESTS` | `200` |
+| `TTS_DAILY_REQUESTS` | `500` |
+
+These are **development defaults**, not a considered production budget — `$50/day`
+globally is a figure to change before you rely on it, not one to inherit.
+Per-operation cost estimates live alongside them in `COST_ESTIMATES` (RunPod, for
+instance, defaults to ~$0.001/sec, roughly an RTX 4090 / A6000 tier).
+
+## Storage — read this before relying on it
+
+<Aside type="danger" title="The default storage is in-memory, so budgets reset on restart">
+`divinci.spendGuard` is constructed with no options, which means
+`InMemorySpendStorage` — a plain array on the instance. Consequences:
+
+- **Every process has its own ledger.** Two instances of your service each get
+  their own budget, so a `$25/day` cap becomes `$25 × instances`.
+- **A restart or redeploy resets spend to zero**, and the day's budget starts
+  over.
+- **Serverless makes this worse**, since a cold start is a fresh ledger.
+
+This is fine for local development and useless as enforcement anywhere else.
+Supply durable storage before you depend on a limit holding.
+</Aside>
+
+The SDK ships a Cloudflare D1 implementation that works over the HTTP API, so it
+needs no Worker binding and runs from any Node process:
+
+```typescript
+import { D1HttpSpendStorage } from "@divinci-ai/server";
+
+const storage = new D1HttpSpendStorage({
+  accountId: process.env.CF_ACCOUNT_ID!,
+  databaseId: process.env.CF_D1_DATABASE_ID!,
+  apiToken: process.env.CF_API_TOKEN!,
+});
+
+divinci.spendGuard.setStorage(storage);
+```
+
+The `spend_records` table is created for you — the storage initializes lazily on
+first use, and `autoInitialize` (default `true`) creates it on construction. Set
+`autoInitialize: false` if you manage schema migrations externally, and call
+`storage.initialize()` yourself when you are ready.
+
+Call `setStorage()` **before** the first `checkBudget()` — records already written
+to the in-memory store do not migrate, so anything spent beforehand is invisible
+to the new ledger. `SpendStorage` is an interface, so backing it with your own
+database is a matter of implementing `record`, `updateActualCost`, `sumTotal`,
+`sumByProvider`, `countByUser`, and `countActiveByUser`.
+
+## Alerts
+
+`evaluateAlerts()` returns the threshold breaches it can see in the ledger. If
+the client is constructed with a `killSwitchApiUrl`, alerts are also forwarded
+there for remote handling.
+
+<Aside type="caution" title="Spend Guard advises; it does not stop anything">
+Nothing here intercepts a provider call. `checkBudget()` returns a verdict your
+code must act on, `paused` is a flag your code must read, and an alert is a
+notification. A caller that forgets to check the result spends exactly as if
+Spend Guard were not installed. Put the check on the path that submits the job,
+not beside it.
+</Aside>
+
+## Gotchas
+
+- **`allowed: false` carries a `reason`.** Surface it — the reasons distinguish
+  "global daily budget" from "this user's concurrency cap", which are different
+  problems with different fixes.
+- **`record()` before the work, not after.** Recording afterwards leaves a window
+  where concurrent checks under-count in-flight spend and over-admit.
+- **The provider list is closed.** A service outside the five `ProviderName`
+  values cannot be tracked without extending the type.
+- **`getDailySummary(date)` takes a date string** — omit it for today, pass one
+  to reconcile a previous day after `updateCost()` calls have landed.
+- **Limits are compile-time constants**, not per-workspace configuration. They
+  are the same for every caller of your integration.
+
+## Related
+
+- [Notifications, Analytics & Metrics](/server/observability/) — usage reporting
+  for spend that *does* run through Divinci
+- [Channels & Access → Pricing tiers](/server/channels-access/#pricing-tiers) —
+  per-window spend allowances for your own end users

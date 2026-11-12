@@ -1,0 +1,81 @@
+---
+/**
+ * PostHog for the docs site.
+ *
+ * Renders NOTHING unless PUBLIC_POSTHOG_KEY is set at build time, so local
+ * builds, previews and any environment without a key stay completely
+ * un-instrumented rather than half-instrumented.
+ *
+ * Three deliberate differences from the web app's setup:
+ *
+ *  1. Session replay is OFF, not merely masked. This site hosts the Ask
+ *     Divinci assistant, whose panel renders the visitor's questions and the
+ *     AI's answers. Replay here would capture conversation content, and no
+ *     amount of masking config is worth betting that on.
+ *  2. Consent precedence is reimplemented inline rather than imported. The
+ *     docs are a separate package from the web client and cannot import from
+ *     it; the rules are duplicated on purpose and must be kept in step with
+ *     src/services/analytics-consent.ts in the web client.
+ *  3. No identify() call. Docs visitors are anonymous and should stay that
+ *     way — there is no account context here to attach.
+ *
+ * NOTE: the docs worker currently sends no Content-Security-Policy. If one is
+ * added, it must allow the PostHog host in script-src and connect-src or
+ * analytics will fail silently.
+ */
+const posthogKey = import.meta.env.PUBLIC_POSTHOG_KEY || "";
+const posthogHost = import.meta.env.PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com";
+const enabled = Boolean(posthogKey);
+---
+
+{enabled && (
+  <script is:inline define:vars={{ posthogKey, posthogHost }}>
+    (function () {
+      var STORAGE_KEY = "divinci-analytics-consent";
+      // Mirrors CONSENT_MODEL in the web client. "opt-out" = capture until
+      // the visitor refuses; flip to "opt-in" to require agreement first.
+      var CONSENT_MODEL = "opt-out";
+
+      function storedChoice() {
+        try {
+          var v = localStorage.getItem(STORAGE_KEY);
+          return v === "granted" || v === "denied" ? v : "unset";
+        } catch (e) {
+          return "unset";
+        }
+      }
+
+      function browserRefusesTracking() {
+        if (typeof navigator === "undefined") return false;
+        if (navigator.globalPrivacyControl === true) return true;
+        var dnt = navigator.doNotTrack || window.doNotTrack;
+        return dnt === "1" || dnt === "yes";
+      }
+
+      // Precedence: explicit choice > browser refusal signal > model default.
+      function allowed() {
+        var choice = storedChoice();
+        if (choice === "granted") return true;
+        if (choice === "denied") return false;
+        if (browserRefusesTracking()) return false;
+        return CONSENT_MODEL === "opt-out";
+      }
+
+      if (!allowed()) return;
+
+      // Minimal official loader stub.
+      !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset group identify".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+
+      window.posthog.init(posthogKey, {
+        api_host: posthogHost,
+        // The assistant renders chat content into this page. Replay off, and
+        // autocapture text masked, so neither channel can carry it.
+        disable_session_recording: true,
+        mask_all_text: true,
+        // Docs URLs are public and carry no user data, so pageviews are safe
+        // and are the main thing worth having here.
+        capture_pageview: true,
+      });
+    })();
+  </script>
+)}

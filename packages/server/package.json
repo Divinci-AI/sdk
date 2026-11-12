@@ -1,0 +1,97 @@
+{
+  "name": "@divinci-ai/server",
+  "version": "0.7.0",
+  "description": "Divinci AI Server SDK for Node.js applications",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./workspaces": {
+      "types": "./dist/workspaces/index.d.ts",
+      "import": "./dist/workspaces/index.js"
+    },
+    "./releases": {
+      "types": "./dist/releases/index.d.ts",
+      "import": "./dist/releases/index.js"
+    },
+    "./rag": {
+      "types": "./dist/rag/index.d.ts",
+      "import": "./dist/rag/index.js"
+    },
+    "./api-keys": {
+      "types": "./dist/api-keys/index.d.ts",
+      "import": "./dist/api-keys/index.js"
+    },
+    "./x402-wallet": {
+      "types": "./dist/x402/viem-wallet.d.ts",
+      "import": "./dist/x402/viem-wallet.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm run build",
+    "prepack": "node ../../scripts/assert-packed-deps.mjs && node ../../scripts/assert-version-honesty.mjs"
+  },
+  "dependencies": {
+    "@divinci-ai/types": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.10",
+    "@vitest/coverage-v8": "^3.2.4",
+    "msw": "^2.12.9",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {
+    "viem": "^2.21.0"
+  },
+  "keywords": [
+    "divinci",
+    "ai",
+    "sdk",
+    "server",
+    "api",
+    "node"
+  ],
+  "author": "Divinci AI <engineering@divinci.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues",
+    "email": "engineering@divinci.app"
+  },
+  "homepage": "https://sdk.divinci.ai/server",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": false
+}

@@ -1,0 +1,185 @@
+---
+title: "Security & Abuse Protection"
+description: "How Divinci protects public Releases — built-in layered rate limiting and abuse defense, plus the controls you set: the Turnstile free-chat gate, embed-domain allowlist, spend caps, and landing-page HMAC."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Public Releases — especially **anonymous, no-login chat** — are the surface most exposed to abuse: bot floods, scraping, and wallet-burning. Divinci applies layered, defense-in-depth protection automatically, and gives you several controls to harden a public Release further.
+
+## Built-in protection
+
+Every anonymous-chat Release is protected by a defense-in-depth stack in the platform API. You don't configure these — they apply automatically, and they run **before any model call**, so blocked traffic never reaches (or bills) the LLM:
+
+- **Per-IP velocity limits** — un-spoofable rate caps keyed on the Cloudflare client IP; the primary floor against bot floods. Over-limit requests get a `429` with `Retry-After`.
+- **Per-device quotas** — monthly plus short-term burst caps per device, so one visitor can't churn unlimited messages across conversations.
+- **Aggregate caps** — a workspace-wide ceiling tied to your subscription tier.
+- **Abuse detection** — flags device/IP rotation patterns and blocks high-severity offenders.
+- **Account lockout** — authentication endpoints add per-IP rate limiting plus a temporary lockout after repeated failures, to blunt credential stuffing.
+
+The controls below are the knobs **you** set per Release to harden it further.
+
+## Lock embeds to your domains
+
+If you embed a Release, set the workspace's **`allowedDomains`** so only your origins can load it. **Always set it explicitly for a production embed** — an unset allowlist is not origin-restricted.
+
+## Cap total spend
+
+Set a workspace **subscription tier** to bound total monthly usage across all users of the workspace — the realistic operator knob for capping spend. Configure it on the WhiteLabel `subscription` document via the workspace/release APIs.
+
+## Free-chat gate (Cloudflare Turnstile)
+
+For public landing pages and homepages, route a Release's anonymous-chat surface through a **verification gate** that enforces a Turnstile CAPTCHA (and optionally email verification) plus per-email and per-device quotas before any message is served. This is the gate behind the Divinci.ai homepage and DrFuhrman.ai.
+
+Configure it on the Release's `freeChatGate` config. It layers **on top of** the built-in protection above.
+
+### Modes
+
+| `mode` | Flow | Use when |
+| ------ | ---- | -------- |
+| `none` | No gate — plain anonymous chat | You want the built-in protection without an email step |
+| `captcha-only` | Turnstile widget per session, no email | Bot deterrent only |
+| `captcha+otp` | Turnstile + email + 6-digit OTP | Verified leads (the Divinci.ai homepage reference impl) |
+| `captcha+magic-link` | Turnstile + email + click-through link | Lower friction; depends on inbox delivery |
+
+Default (unset or `mode: "none"`) is back-compat: the Release's existing `allowAnonymousChat` / `maxAnonymousChatMessages` rules apply unchanged.
+
+### Quota knobs
+
+Per-email and per-device counters gate how much a visitor can send before and after verifying. Defaults shown:
+
+| Field | Default | Meaning |
+| ----- | ------- | ------- |
+| `quota.perEmailLifetime` | 1 | Messages a single email may send **before** verifying |
+| `quota.postVerifyWindowCount` | 5 | Messages per rolling window **after** verifying |
+| `quota.postVerifyWindowHours` | 24 | Length of that rolling window |
+| `quota.perDeviceLifetime` | 3 | Per-"device" lifetime cap — applied in **all** modes (see below) |
+| `quota.lifetimeResetHours` | unset (never) | Optional. Refill both **lifetime** counters (`perEmailLifetime`, `perDeviceLifetime`) every N hours — `24` for daily, `168` for weekly. Fixed UTC buckets, so every visitor's allowance refills at the same boundary |
+
+<Aside type="caution" title="A gate “device” is an IP, not a browser">
+`perDeviceLifetime` counts against `sha256(client IP)` — there is **no** cookie,
+user-agent, or fingerprint component. Everyone behind one NAT shares a single
+counter, so at the default of 3 a corporate office, a university, a school, or a
+conference wifi collectively gets three lifetime messages, and the counter's TTL
+is ~90 days. Raise it substantially for any surface whose visitors plausibly
+share an egress IP, and treat it as a blunt bot backstop rather than a
+per-visitor allowance.
+</Aside>
+
+By default the lifetime counters never refill, so a visitor who uses their
+allowance is locked out until the counter ages out (~90 days). For a public
+landing page you usually want them to come back: set `lifetimeResetHours` to
+`24` (daily) or `168` (weekly). The reset is a fixed UTC boundary — with `168`,
+allowances refill every Thursday at 00:00 UTC (buckets count from the Unix epoch) — and it does not touch the post-verify
+rolling window (`postVerifyWindowHours` / `postVerifyWindowCount`).
+
+```typescript
+await divinci.releases.update("rel_123", {
+  freeChatGate: {
+    mode: "captcha+otp",
+    quota: {
+      perEmailLifetime: 1,
+      postVerifyWindowCount: 5,
+      postVerifyWindowHours: 24,
+      perDeviceLifetime: 3,
+    },
+  },
+});
+```
+
+### Turnstile: platform vs BYO
+
+The gate's Turnstile pairing decides whose Cloudflare account/sitekey verifies the challenge.
+
+| `turnstile.mode` | Sitekey | Secret | Notes |
+| ---------------- | ------- | ------ | ----- |
+| `platform` (default) | Divinci's shared widget | Managed by Divinci | Domain binding handled by the embed-origin allowlist. |
+| `byo` | `siteKey` on the config (public, served to the client) | `secretRef` → an env/secret-store key **name** holding the secret | Run your own widget in your own Cloudflare account/analytics. |
+
+```typescript
+// Bring your own Turnstile widget
+await divinci.releases.update("rel_123", {
+  freeChatGate: {
+    mode: "captcha-only",
+    turnstile: {
+      mode: "byo",
+      siteKey: "0x4AAA...",            // public sitekey, safe to serve
+      secretRef: "MY_TURNSTILE_SECRET", // NAME of the secret-store key, never the raw secret
+    },
+  },
+});
+```
+
+<Aside type="caution" title="BYO secretRef is by-reference">
+`secretRef` is the **name** of a secret-store key — never the raw secret (same pattern as `idpConfig.clientSecretRef`). The server resolves only a name that is unambiguously a Turnstile key; anything else is refused and verification **fails closed**.
+</Aside>
+
+## Landing-page HMAC
+
+Even with a Turnstile gate, the bare anonymous-chat endpoint can be called directly by anyone who knows the release id — burning your wallet/quota. Landing-page HMAC closes that hole: when enabled, anonymous-chat calls must carry a valid signature, so **only your signing proxy** (e.g. a Cloudflare Worker holding the shared HMAC key) can reach the endpoint.
+
+This is the one security control with a CLI flag:
+
+```bash
+# Require signed anonymous chat for a release
+divinci release update <releaseId> --require-signed-anonymous-chat
+
+# Turn it back off
+divinci release update <releaseId> --no-require-signed-anonymous-chat
+```
+
+Or via the SDK (`requireSignedAnonymousChat` only has an effect while `allowAnonymousChat` is `true`):
+
+```typescript
+await divinci.releases.update("rel_123", {
+  allowAnonymousChat: true,
+  requireSignedAnonymousChat: true,
+  maxAnonymousChatMessages: 12,
+});
+```
+
+Share the HMAC key only with your signing proxy. See the [Releases → Anonymous chat](/server/releases/) page for the full anonymous-chat field reference.
+
+<Aside type="tip" title="Layer the controls">
+For a public landing page: set `allowedDomains`, enable the free-chat gate (`captcha+otp` for lead capture, `captcha-only` for a pure bot deterrent), and turn on landing-page HMAC so only your proxy can reach the endpoint. The built-in per-IP and per-device protection applies underneath all of it.
+</Aside>
+
+## Protecting what users send you
+
+Everything above controls **who** may reach a Release and how often. It says
+nothing about the *contents* of the messages that get through — that is the job
+of the Safety controls:
+
+- [Safety: Moderation & Flaggers](/server/safety/) — block harmful or off-topic
+  messages before generation, and escalate conversations that need a human.
+- [De-Identification](/server/de-identification/) — strip personal information
+  from a message before it is stored, retrieved against, moderated, or sent to a
+  model.
+
+## Requesting a BAA
+
+If you are a healthcare organization (or work with one) and are evaluating
+Divinci for a use that involves protected health information (PHI), start with
+the [BAA page](https://divinci.ai/baa/). It is the authoritative statement of
+where Divinci stands today, and this section only points you to it.
+
+**To make a request,** email [mike@divinci.ai](mailto:mike@divinci.ai) with the
+subject line `BAA inquiry` and include:
+
+- your organization's name;
+- whether you are a covered entity, a business associate, or something else;
+- whether you want Divinci to host the runtime, or you run the software
+  yourself.
+
+Requests are handled individually, by email.
+
+<Aside type="caution" title="Do not send health information">
+Never send patient or health information to Divinci by email or any other
+channel, whether or not a BAA is in place. Divinci cannot accept it.
+
+The main Divinci platform takes **no** PHI. The only thing that is ever intended
+to handle PHI is a dedicated healthcare chat runtime (Divinci-hosted or
+customer-hosted), and only under the terms described on the
+[BAA page](https://divinci.ai/baa/). Nothing on this page is a certification or a
+statement of legal compliance.
+</Aside>

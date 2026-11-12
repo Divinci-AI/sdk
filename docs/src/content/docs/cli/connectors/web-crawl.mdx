@@ -1,0 +1,92 @@
+---
+title: Web Crawl
+description: Crawl a website, a subpath or a sitemap into a RAG vector from the terminal — divinci connectors web-crawl.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Points at a URL and ingests the pages it finds. The crawl root may be a whole
+site or a deep subpath (`https://example.com/recipes` with
+`--allowed-paths /recipes` crawls only that branch).
+
+**Shape:** config-only — there is no secret, so this connector is fully
+manageable from the CLI. **Provider id:** `web_crawl`.
+
+## Start a crawl
+
+```bash
+# Crawl a site into a vector (follows sitemap.xml by default)
+divinci connectors web-crawl https://docs.example.com --vector <vectorId>
+
+# Re-crawl daily, and swap through a draft vector (see below)
+divinci connectors web-crawl https://docs.example.com \
+  --vector <vectorId> --recurring --swap
+
+# Treat the URL as a sitemap/feed instead of a crawl root
+divinci connectors web-crawl https://docs.example.com/sitemap-0.xml \
+  --vector <vectorId> --feed
+
+# Scope and shape the crawl
+divinci connectors web-crawl https://example.com \
+  --vector <vectorId> --limit 200 \
+  --allowed-paths /docs,/blog --exclude-paths /docs/archive \
+  --subdomains --product-catalog
+```
+
+Re-running the command for the same site **updates** the stored connector
+(settings are persisted), so it is also how you correct a recurring connector's
+configuration.
+
+## Options
+
+| Flag | Default | What it does |
+| --- | --- | --- |
+| `--vector <id>` | — | Target RAG vector |
+| `--limit <n>` | `80` | Max pages |
+| `--feed` | off | Treat the URL as a sitemap / URL feed, not a crawl root |
+| `--feed-format <fmt>` | `sitemap` | `sitemap` \| `url-list` \| `json` (with `--feed`) |
+| `--no-sitemap` | — | Don't follow `sitemap.xml` during the crawl |
+| `--subdomains` | off | Also crawl sub-domains of the root's domain |
+| `--product-catalog` | off | Build a product catalog from schema.org `Product` data |
+| `--recurring` | off | Re-crawl on a schedule |
+| `--cadence <minutes>` | `1440` | Recurrence cadence (15-minute floor) |
+| `--swap` | off | Crawl into a draft vector, swap the live release on success |
+| `--allowed-paths <prefixes>` | — | Comma-separated path prefixes to restrict to |
+| `--exclude-paths <prefixes>` | — | Comma-separated path prefixes to skip |
+
+<Aside type="caution">
+  If the target vector is attached to a **published release**, pass `--swap`.
+  Without it, the live-vector guard rejects every chunk write — the crawl
+  reports success but nothing new becomes retrievable. With `--swap`, the crawl
+  ingests into a fresh draft vector and atomically repoints your live
+  release(s) to it only once the crawl succeeds.
+</Aside>
+
+<Aside type="tip" title="Pages behind a grid or pagination">
+  `sitemap.xml` is followed by default because link-following alone misses
+  anything reachable only through a JS grid, a "load more" button, or numbered
+  pagination. `--no-sitemap` is for the rare site whose sitemap is wrong.
+</Aside>
+
+## Member-gated content
+
+A site that serves only a teaser to anonymous requests can be crawled with
+per-connector scrape authentication (a stored `Cookie` header, or credentials).
+Those fields are encrypted at rest and decrypted only at run time. Configure
+them on the Connectors page or through the API — a cookie session expires, so
+plan to refresh it.
+
+## Sync and re-run
+
+Web crawl is one of the two providers that can be re-run headlessly:
+
+```bash
+divinci connectors sync <connectionId>          # run now
+divinci connectors sync-status <connectionId>   # last 10 jobs
+```
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [WordPress](/cli/connectors/wordpress/) — for a WordPress site, prefer the REST connector over crawling it.
+- `divinci rag crawl` — a one-shot crawl with no recurring connector behind it.

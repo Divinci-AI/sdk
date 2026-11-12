@@ -1,0 +1,48 @@
+---
+title: Local Files
+description: Push files from a folder on your own machine into a Divinci workspace.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+For content that lives on a laptop or a server rather than in a cloud service.
+Nothing polls your machine — **your side pushes**, and Divinci tracks each file
+it has been told about.
+
+**Shape:** credential (an API key). **Provider id:** `local_files`.
+
+## How it works
+
+1. Create the connection, authenticated by a workspace API key.
+2. Register files with the upload endpoint — the browser's File System Access
+   API does this when you pick a folder on the Connectors page.
+3. Each registered file becomes a tracked mapping (name, path, size, type,
+   sync status) that the sync pipeline then processes into the target vector.
+
+Because the record is keyed on the path you send, re-registering the same path
+updates the existing entry instead of creating a duplicate.
+
+<Aside type="note" title="The picker is the supported path today">
+The Connectors page folder picker is the only first-party client for this
+connector. There is no published Divinci file-watcher package — if you want an
+unattended push, call the upload endpoint from your own script or CI job with a
+workspace API key.
+</Aside>
+
+## From the CLI
+
+The provider-agnostic commands work as they do everywhere:
+
+```bash
+divinci connectors status local_files
+divinci connectors settings local_files --auto-sync off
+divinci connectors disconnect local_files
+```
+
+`status` reports the number of tracked files, which is the quickest way to
+confirm a push actually landed.
+
+## See also
+
+- [Managing connections](/cli/connectors/managing/)
+- [RAG Knowledge Base](/server/rag/) — uploading a one-off document is often simpler than a connector.

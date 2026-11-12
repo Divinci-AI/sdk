@@ -1,0 +1,20 @@
+{
+  "name": "@divinci-ai/sdk-integration-tests",
+  "version": "0.0.11",
+  "private": true,
+  "type": "module",
+  "description": "Integration smoke tests that run the real SDK clients against a live environment (staging by default). Asserts actual wire shapes so SDK types cannot silently drift from the API.",
+  "scripts": {
+    "test": "vitest run",
+    "test:staging": "DIVINCI_INTEGRATION_ENV=staging vitest run"
+  },
+  "dependencies": {
+    "@divinci-ai/client": "workspace:*",
+    "@divinci-ai/server": "workspace:*",
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

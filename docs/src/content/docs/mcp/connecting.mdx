@@ -1,0 +1,91 @@
+---
+title: Connecting
+description: Connection lifecycle, state, events, and reconnection for the MCP client.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The MCP client connects over the **Streamable HTTP** transport, at `{serverUrl}/mcp`.
+The client handles session setup and reconnection for you.
+
+The older SSE transport (`/sse` + `/message`) was **retired on 2026-08-07** and
+returns HTTP 410. `SseTransport` is still exported for non-Divinci servers, but it
+fast-fails if you point it at `mcp.divinci.app`.
+
+## Connect and disconnect
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+  autoReconnect: true,
+  maxReconnectAttempts: 5,
+});
+
+await mcp.connect();
+// ... use mcp.tools, mcp.listResources(), etc.
+mcp.disconnect();
+```
+
+## Connection state
+
+`getState()` returns the current `McpConnectionState`:
+
+```
+disconnected → connecting → connected → authenticating → authenticated
+```
+
+(or `error`). Helpers:
+
+```typescript
+mcp.getState();              // current state
+mcp.isConnected();           // transport is up
+await mcp.isAuthenticated(); // a valid Auth0 token is present
+```
+
+## Events
+
+Register handlers with `on()`:
+
+```typescript
+mcp.on({
+  onStateChange: (state) => console.log("state:", state),
+  onToolsChanged: (tools) => refreshTools(tools),
+  onResourcesChanged: (resources) => refreshResources(resources),
+  onError: (err) => console.error(err),
+});
+```
+
+| Event | Fires when |
+|-------|-----------|
+| `onStateChange(state)` | Connection state changes. |
+| `onToolsChanged(tools)` | The server's tool catalog changes. |
+| `onResourcesChanged(resources)` | The server's resource list changes. |
+| `onError(error)` | A transport or protocol error occurs. |
+
+## Reconnection
+
+With `autoReconnect: true` (the default), dropped connections reconnect with
+exponential backoff up to `maxReconnectAttempts`. Tune the base delay and ceiling
+through the constructor.
+
+<Aside type="tip">
+  Subscribe to `onStateChange` and show a "reconnecting" indicator while the
+  client recovers, rather than treating a transient drop as a hard failure.
+</Aside>
+
+## Server capabilities
+
+After connecting, inspect what the server supports:
+
+```typescript
+const caps = mcp.getServerCapabilities();
+console.log(caps?.name, caps?.version, caps?.protocolVersion);
+```
+
+## Health check
+
+```typescript
+await mcp.ping(); // throws if the connection is unhealthy
+```

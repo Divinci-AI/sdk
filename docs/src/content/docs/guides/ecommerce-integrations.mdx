@@ -1,0 +1,169 @@
+---
+title: Connect an E-commerce Store
+description: Embed the chat widget on Squarespace, WooCommerce, Shopify, or BigCommerce, sync your product catalog into RAG, and keep it in sync automatically.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+If your storefront runs on **Squarespace**, **WooCommerce** (WordPress),
+**Shopify**, or **BigCommerce**, a Divinci release can do two things for it:
+
+1. **Embed the chat widget** on every storefront page (a script tag — no
+   backend changes).
+2. **Sync your product catalog** into a [RAG collection](/server/rag) so the
+   assistant can answer "which of your bundles has X" or "is Y in stock"
+   questions, cite the right product page, and recommend products by name.
+
+Both are configured from the whitelabel dashboard (**Setup → Integrations**)
+— no code required for the storefront side. This guide covers the connect
+flow for each platform and how to keep the catalog automatically in sync.
+
+<Aside type="tip">
+Catalog sync is a **read-only, authenticated pull** from each platform's own
+product API — Divinci never writes to your store. WooCommerce and Shopify use
+a merchant-scoped API key/token you generate yourself; Squarespace requires a
+Commerce plan API key.
+</Aside>
+
+## 1. Embed the chat widget
+
+The same embed script works on every platform — paste it once, replace
+`{RELEASE_ID}` with your [release](/server/releases)'s id:
+
+```html
+<script src="https://embed.divinci.app/embed-script.js" divinci-release-id="{RELEASE_ID}"></script>
+```
+
+<Tabs>
+<TabItem label="Squarespace">
+**Settings → Advanced → Code Injection → Footer**, paste the script tag, save.
+Requires a Business plan or higher.
+</TabItem>
+<TabItem label="WooCommerce">
+Paste the script tag into your theme's `footer.php` just before `</body>`, or
+use a header/footer script plugin if you'd rather not edit theme files
+directly.
+</TabItem>
+<TabItem label="Shopify">
+**Online Store → Themes → Edit code**, open `layout/theme.liquid`, paste the
+script tag just before `</body>`, save. The widget now loads on every
+storefront page.
+</TabItem>
+<TabItem label="BigCommerce">
+**Storefront → My Themes → Advanced → Edit Theme Files**, open
+`templates/layout/base.html`, paste the script tag just before `</body>`, and
+save. (Script Manager can't add the `divinci-release-id` attribute to a URL
+script, so edit the theme file instead.) Re-apply the change if you switch or
+update your theme.
+</TabItem>
+</Tabs>
+
+## 2. Sync your product catalog
+
+Catalog sync pulls your full product list through each platform's own API —
+no manual export/import. From your whitelabel's **RAG Vector → Product
+Catalog → Upload → Feed Digester**, pick your platform's tab and connect:
+
+<Steps>
+
+1. **Get an API credential** (platform-specific — see below).
+2. **Connect** — paste your store URL and credential into the Feed Digester's
+   connect form.
+3. **Pull Products** — Divinci fetches your catalog and shows a preview with
+   a prebuilt field mapping (price, images, stock, category, brand).
+4. **Import** — creates a searchable product catalog and indexes it into your
+   chosen RAG vector. The assistant can now answer product questions and link
+   back to the right storefront page.
+
+</Steps>
+
+<Tabs>
+<TabItem label="Squarespace">
+Requires a **Commerce plan**. Generate a key at **Settings → Developer
+Tools → API Keys** with **Products (read)** permission.
+</TabItem>
+<TabItem label="WooCommerce">
+**Settings → Advanced → REST API → Add key**, with **Read** permission. This
+gives you a Consumer Key + Consumer Secret pair — both are required.
+</TabItem>
+<TabItem label="Shopify">
+**Settings → Apps and sales channels → Develop apps**, create an app, enable
+the `read_products` Admin API scope, install it, and copy the generated
+**Admin API access token** (shown once).
+</TabItem>
+</Tabs>
+
+<Aside type="caution">
+Credentials are encrypted at rest and are never returned in any API response
+after the initial save. If you lose a WooCommerce/Shopify credential, generate
+a new one from your store's admin and reconnect — there's no way to retrieve
+the original value from Divinci.
+</Aside>
+
+## BigCommerce: recommendations, member pricing, and add-to-cart
+
+BigCommerce is supported differently from the three platforms above, so read
+this before planning an integration. It has **no one-click "pull my store"
+tab** in the Feed Digester today; what it has is a deeper commerce layer built
+for stores that sell on membership pricing.
+
+| Capability | How it works on BigCommerce |
+| --- | --- |
+| **Catalog into RAG** | Import a product feed (JSON or CSV URL, including the Octocom feed format, which carries BigCommerce variant and per-tier price fields) through the Feed Digester. There is no authenticated Store API pull, so it is a feed import rather than an automatic re-sync. |
+| **Product recommendations in chat** | Products the assistant recommends render as product cards inside the conversation, with image, name and a link back to the product page. |
+| **Member-tier pricing** | Cards show the price for the visitor's tier — `non_member`, `gold_member`, `platinum_member` or `diamond_member`. Your site passes the visitor's tier when it signs them in to the widget; you can map your own membership names to these tiers on the integration. Visitors with no tier see the standard price. |
+| **Add to cart** | Cards offer an add-to-cart link built from a URL pattern, by default `https://{store_domain}/cart.php?action=add&sku={sku}&qty={qty}`. It opens in a new tab and carries a `ref=divinci` parameter so you can attribute the sale. You can change the pattern or turn it off. |
+| **Order and subscription events** | A signed webhook (HMAC-SHA256) from your store keeps order and subscription records in step. Unsigned or badly signed requests are rejected. |
+
+<Aside type="note">
+There is **no BigCommerce marketplace app** yet, so there is no one-click
+install from the BigCommerce App Marketplace. You connect with a feed URL, the
+embed script, and (optionally) webhooks.
+</Aside>
+
+## 3. Keep it in sync automatically
+
+By default, catalog sync is a one-time pull. If your inventory or pricing
+changes regularly, enable **automatic re-sync** on the Feed Digester's import
+step ("Keep this catalog in sync automatically") and pick an interval —
+6 hours, 12 hours, daily, or weekly.
+
+On each scheduled run, Divinci re-pulls your full catalog and only
+re-processes what actually changed:
+
+- **New products** are added and indexed.
+- **Changed products** (price, description, stock, etc.) are re-indexed so
+  the assistant's answers stay current.
+- **Unchanged products** are left alone — no wasted re-indexing.
+- **Products no longer returned by your store** are marked out of stock
+  rather than deleted, so the assistant never cites a broken link and any
+  existing conversations that reference the product stay coherent.
+
+Aliases, prominence weighting, and any "preferred recommendation" pins you've
+set manually on a product always survive a re-sync — auto-sync never
+overwrites operator-curated merchandising.
+
+<Aside type="note">
+Auto-sync only applies to catalogs imported via an authenticated platform
+connection (Squarespace/WooCommerce/Shopify). BigCommerce catalogs are
+imported from a feed URL, so they are not re-pulled automatically. A catalog imported from a plain
+JSON feed URL or a CSV upload has no credential to re-pull with, so it stays
+a one-time import — re-run the Feed Digester manually whenever you want to
+refresh it.
+</Aside>
+
+## Troubleshooting
+
+**"This integration has no API key" / "needs a store URL and access token"**
+— the connect form was submitted without a required credential field for that
+platform. Re-check the credential steps above.
+
+**Products aren't showing up in chat after import** — confirm the catalog's
+status is `completed` on the Product Catalog list page. A `processing` status
+means indexing is still in progress; large catalogs (500+ products) can take
+a few minutes.
+
+**A product's info seems stale** — if auto-sync is off, re-run the Feed
+Digester manually. If it's on, check the catalog's last sync time and status
+on the Product Catalog list page; a `partial` or `failed` status means some
+products didn't re-index and will be retried on the next scheduled run.

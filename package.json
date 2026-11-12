@@ -1,0 +1,60 @@
+{
+  "name": "@divinci-ai/sdk-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Official SDKs for integrating Divinci AI into your applications",
+  "author": "Divinci AI <engineering@divinci.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues"
+  },
+  "homepage": "https://sdk.divinci.ai",
+  "scripts": {
+    "build": "pnpm -r build",
+    "build:types": "pnpm --filter @divinci-ai/types build",
+    "build:client": "pnpm --filter @divinci-ai/client build",
+    "test": "pnpm --filter \"@divinci-ai/client\" --filter \"@divinci-ai/mcp\" --filter \"@divinci-ai/server\" test",
+    "test:coverage": "pnpm --filter \"@divinci-ai/client\" --filter \"@divinci-ai/mcp\" --filter \"@divinci-ai/server\" test:coverage",
+    "clean": "pnpm -r clean",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish"
+  },
+  "devDependencies": {
+    "@asteasolutions/zod-to-openapi": "^7.0.0",
+    "@changesets/changelog-github": "^0.5.0",
+    "@changesets/cli": "^2.27.0",
+    "@types/node": "22.19.13",
+    "tsx": "^4.7.0",
+    "typescript": "^5.5.4",
+    "zod": "^3.22.0"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22.14.0",
+    "pnpm": ">=10 <11"
+  },
+  "pnpm": {
+    "overrides": {
+      "picomatch": "^4.0.4",
+      "yaml": "^2.8.3",
+      "esbuild": "^0.25.0",
+      "devalue": "^5.8.1",
+      "astro": "^6.4.6",
+      "vite": "^5.4.21 || ^7.3.5",
+      "brace-expansion": "^2.0.3 || ^5.0.5",
+      "postcss": "^8.5.18",
+      "nanoid@^3.0.0": "^3.3.17",
+      "js-yaml@^4.0.0": "^4.3.1",
+      "svgo": "^4.0.2",
+      "sharp": "^0.35.0",
+      "ws": "^8.21.0"
+    }
+  }
+}

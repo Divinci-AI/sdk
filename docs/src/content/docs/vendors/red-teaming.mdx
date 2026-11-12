@@ -1,0 +1,48 @@
+---
+title: Red-teaming & Evals
+description: Why adversarial testing and attested evaluation on Divinci are first-party rather than vendor-supplied.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Unlike every other category in this catalog, red-teaming and evaluation have
+**no vendor list** — they are first-party, and deliberately so.
+
+## What runs
+
+| Capability | Implementation | Vendor |
+| --- | --- | --- |
+| Adversarial probes | Divinci red-team taxonomy + probe set | first-party |
+| Attack scoring | Divinci scorers, with defense-layer attribution | first-party |
+| Benchmark execution | TrustBench harness (Inspect-compatible) | first-party |
+| Run attestation | Ed25519-signed manifests, verifiable offline | first-party |
+
+The **models under test** are of course whatever you selected — the whole
+[model catalog](/guides/models/) is available as a target, including your own
+BYOK endpoints.
+
+## Why not a third-party red-team vendor
+
+Two reasons, and the second is the one that matters:
+
+1. **Attribution.** A probe that fails needs to say *which defense layer*
+   let it through — moderation, the system prompt, the tool gate, the release
+   config. An external scanner sees only the final answer, so it can tell you
+   that something got through and not where.
+2. **Attestation.** A TrustBench run is signed with a platform key and the
+   manifest verifies offline against a published key, with no dependency on
+   Divinci being reachable — or trusted — at verification time. A result you
+   cannot independently verify is a marketing claim, not evidence.
+
+<Aside type="caution" title="A red-team pass is a snapshot, not a certificate">
+It scores the release as configured at that moment. Change the model, the
+system prompt, the tool set or the RAG corpus and the result no longer describes
+what you are running. Re-run on release, not on a schedule someone chose once.
+</Aside>
+
+## See also
+
+- [Red Teaming](/server/red-team/) — running one, and reading the report.
+- [TrustBench (Attested Evals)](/server/trustbench/)
+- [QA Suites](/server/qa/)
+- [Safety: Moderation & Flaggers](/server/safety/)

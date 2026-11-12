@@ -1,0 +1,103 @@
+---
+title: Connectors
+description: Every Divinci data connector — web crawl, WordPress, Google Drive, Gmail, Calendar, Dropbox, Notion, Zoom, S3, R2, GCS, local files, Recall.ai and Practice Better — and what the CLI can do with each.
+---
+
+import { Aside, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+A **connector** is a standing link between a data source you own and a Divinci
+workspace. Once connected it ingests into a RAG vector (and optionally the
+fine-tuning pipeline), on demand or on a recurring schedule, without anyone
+re-uploading files.
+
+Fourteen providers ship today. They differ in one way that matters more than any
+other — **how you connect them** — and that decides how much of the job the CLI
+can do.
+
+## The three connector shapes
+
+| Shape | Providers | Connect from |
+| --- | --- | --- |
+| **Config-only** — the connector *is* its configuration; no secret to hand over | [Web Crawl](/cli/connectors/web-crawl/), [WordPress](/cli/connectors/wordpress/) | ✅ CLI, API, web app |
+| **Credential** — you paste a key/secret we validate before storing | [AWS S3](/cli/connectors/aws-s3/), [Cloudflare R2](/cli/connectors/cloudflare-r2/), [Google Cloud Storage](/cli/connectors/google-cloud-storage/), [Recall.ai](/cli/connectors/recall-ai/), [Practice Better](/cli/connectors/practice-better/), [Local Files](/cli/connectors/local-files/) | API, web app |
+| **OAuth redirect** — the provider's own consent screen | [Google Drive](/cli/connectors/google-drive/), [Gmail](/cli/connectors/gmail/), [Google Calendar](/cli/connectors/google-calendar/), [Dropbox](/cli/connectors/dropbox/), [Notion](/cli/connectors/notion/), [Zoom](/cli/connectors/zoom/) | Web app (a human must click Allow) |
+
+<Aside type="caution" title="Only two providers can be synced headlessly">
+`divinci connectors sync` and `POST /api/v1/connectors/:connectionId/sync`
+accept **`web_crawl` and `wordpress` only**. Every other provider's pipeline
+needs an explicit file selection and an interactive user token, so the API
+answers with a `400` naming the supported providers rather than queueing a job
+that could never pick files. Sync those from the Connectors page in the web app.
+
+What the CLI *does* do for all fourteen: `list`, `status`, `settings`,
+`sync-status`, `sync-cancel`, `disconnect` and `stats`.
+</Aside>
+
+## Every connector
+
+<CardGrid>
+  <LinkCard title="Web Crawl" href="/cli/connectors/web-crawl/" description="Crawl a site, subpath or sitemap into a vector — recurring, with draft-and-swap." />
+  <LinkCard title="WordPress" href="/cli/connectors/wordpress/" description="Posts, pages and custom post types over the WP REST API." />
+  <LinkCard title="Google Drive" href="/cli/connectors/google-drive/" description="Documents and folders, with push notifications on change." />
+  <LinkCard title="Gmail" href="/cli/connectors/gmail/" description="Email threads as assistant context." />
+  <LinkCard title="Google Calendar" href="/cli/connectors/google-calendar/" description="Events and scheduling context." />
+  <LinkCard title="Dropbox" href="/cli/connectors/dropbox/" description="Files from a Dropbox account, including audio and video." />
+  <LinkCard title="Notion" href="/cli/connectors/notion/" description="Pages and databases from a Notion workspace." />
+  <LinkCard title="Zoom" href="/cli/connectors/zoom/" description="Cloud recordings and transcripts." />
+  <LinkCard title="AWS S3" href="/cli/connectors/aws-s3/" description="Any bucket, scoped by key prefix." />
+  <LinkCard title="Cloudflare R2" href="/cli/connectors/cloudflare-r2/" description="R2 over its S3-compatible API." />
+  <LinkCard title="Google Cloud Storage" href="/cli/connectors/google-cloud-storage/" description="GCS buckets via a service-account key." />
+  <LinkCard title="Local Files" href="/cli/connectors/local-files/" description="Files pushed from a folder on your own machine." />
+  <LinkCard title="Recall.ai" href="/cli/connectors/recall-ai/" description="Meeting recordings and transcripts via a bot notetaker." />
+  <LinkCard title="Practice Better" href="/cli/connectors/practice-better/" description="Clinical records, de-identified before indexing." />
+</CardGrid>
+
+<LinkCard
+  title="Managing connections"
+  href="/cli/connectors/managing/"
+  description="list, status, settings, sync, sync-status, sync-cancel, disconnect, stats — the provider-agnostic commands."
+/>
+
+## Two things every connector shares
+
+### Pipelines (`targetTypes`)
+
+A connection processes into `rag`, into `fine-tuning`, or both. Selecting
+fine-tuning always **adds** RAG — the SFT pipeline consumes RAG-processed
+chunks, so it cannot run alone.
+
+### The live-vector guard
+
+If a connector's target vector is attached to a **published release**, chunk
+writes to it are rejected. The rejections are *recorded, not thrown*, so the
+sync reports success and nothing new becomes retrievable — the single most
+common "it ran but changed nothing" report.
+
+Use draft-and-swap (`--swap` on the CLI, `swapOnSuccess` in the API/web form):
+the sync ingests into a fresh draft vector and atomically repoints your live
+release(s) at it only once the run succeeds. Both the web-crawl and WordPress
+forms default it **on** for exactly this reason.
+
+## Recurring sync
+
+Set `autoSync` with a cadence in minutes (**15-minute floor**, default 1440 =
+daily):
+
+```bash
+divinci connectors settings wordpress --auto-sync on --cadence 1440
+```
+
+How a change reaches us differs by provider:
+
+| Mechanism | Providers | Latency |
+| --- | --- | --- |
+| **Push webhook** | Google Drive, Gmail, Google Calendar (per-connection watch channels, auto-renewed), Zoom (app-level) | near real-time |
+| **Polling** | everything else — and any webhook provider whose channel lapsed | the connection's cadence |
+
+A failed webhook registration degrades to polling rather than to silence.
+
+## See also
+
+- [RAG Knowledge Base](/server/rag/) — the vectors these connectors ingest into.
+- [MCP tool catalog](/mcp/tool-catalog/#groups--access) — `connector_list`, `connector_sync`, `connector_status` and friends for agentic IDEs.
+- `divinci rag crawl` — a one-shot crawl with no recurring connector behind it.

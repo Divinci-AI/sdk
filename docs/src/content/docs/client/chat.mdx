@@ -1,0 +1,175 @@
+---
+title: Chat
+description: Create threads, send messages, read history, and submit feedback.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+The `client.chat` namespace is the heart of the Client SDK. It manages **threads**
+(conversations) and the messages within them.
+
+## Creating a thread
+
+```typescript
+const thread = await client.chat.create({
+  title: "Support session",   // optional
+  systemMessage: "Be concise", // optional
+  visibility: "private",       // "private" | "shared" | "public"
+});
+
+console.log(thread.id); // use this id for all subsequent calls
+```
+
+The Release id is taken from the client — you don't pass it again.
+
+### Anonymous threads
+
+For public/landing-page chat where the user isn't signed in, open an ephemeral
+thread. The Release must permit anonymous chat.
+
+```typescript
+const thread = await client.chat.createAnonymous();
+```
+
+## Sending a message
+
+Use **`stream()`** to send a message and receive the assistant's reply — it
+resolves with the final `ChatMessage` (and can deliver tokens incrementally;
+see [Streaming](/client/streaming)).
+
+```typescript
+const reply = await client.chat.stream(thread.id, "What is your return policy?", {
+  assistantName: "your-assistant-id", // required — the release's assistant/model id
+});
+
+console.log(reply.content);  // assistant text
+console.log(reply.context);  // RAG sources, if any
+```
+
+<Aside type="caution" title="assistantName is required">
+  The message endpoint requires `assistantName` (or `replyTo`) — it's the
+  assistant/model id configured on your Release (`assistant.id` on the release
+  document). Omitting both returns `400 bad form data`.
+</Aside>
+
+### Message options
+
+```typescript
+await client.chat.stream(thread.id, "Summarize the docs", {
+  assistantName: "support-bot",     // required: which assistant responds
+  attachments: [{ type: "image", data: dataUrl, mimeType: "image/png" }],
+  metadata: { source: "help-center" },
+  replyTo: "msg_abc",               // thread a reply to a specific message
+});
+```
+
+### Fire-and-forget with `send()`
+
+`send()` posts the message and returns a `SendAck { status: "sent" }` immediately.
+Generation continues server-side — the reply arrives over the realtime WebSocket
+or becomes visible via `getTranscript()`. Use it when you don't need to render
+the reply inline:
+
+```typescript
+const ack = await client.chat.send(thread.id, "Log this note", {
+  assistantName: "support-bot",
+});
+console.log(ack.status); // "sent"
+
+// reply arrives async — poll when you need it:
+const messages = await client.chat.getTranscript(thread.id);
+```
+
+### Blocking send with `sendAndPoll()`
+
+If you need a single call that waits for the assistant reply (no streaming),
+`sendAndPoll()` submits the message then polls `getTranscript()` until the
+assistant's message appears:
+
+```typescript
+const reply = await client.chat.sendAndPoll(thread.id, "Summarize this.", {
+  assistantName: "support-bot",
+  pollInterval: 1500,  // check every 1.5s (default)
+  timeout: 60_000,     // give up after 60s (default)
+});
+console.log(reply.content);
+```
+
+## Listing and reading threads
+
+```typescript
+// Paginated list of the caller's threads
+const { data, hasMore, total } = await client.chat.list({ limit: 20 });
+
+// A single thread's metadata
+const thread = await client.chat.get("chat_123");
+
+// Full message history for a thread
+const messages = await client.chat.getTranscript("chat_123");
+for (const m of messages) {
+  console.log(`${m.role}: ${m.content}`);
+}
+
+// Delete a thread
+await client.chat.delete("chat_123");
+```
+
+## Feedback and ratings
+
+Capture thumbs up/down and free-text feedback on assistant messages.
+
+```typescript
+// Simple rating: 1 = thumbs up, -1 = thumbs down, 0 = clear
+await client.chat.rateMessage(thread.id, messageId, 1);
+
+// Rating + free-text reason
+await client.chat.submitMessageFeedback(thread.id, messageId, {
+  sentiment: -1,
+  feedback: "The answer missed the EU shipping case.",
+});
+```
+
+For anonymous (landing/embed) chats, feedback is proven by the held signed
+transcript rather than a session:
+
+```typescript
+await client.chat.submitAnonymousFeedback({
+  releaseId: "rel_abc123",
+  transcript,            // the client-held signed transcript
+  signiture: hmac,       // server-issued HMAC
+  messageIndex: 3,
+  sentiment: 1,
+  feedback: "Perfect, thanks!",
+});
+```
+
+To **read** the feedback your releases received (operator view: list, filter,
+and aggregate stats), use the [`client.feedback`](/client/observability#message-feedback)
+namespace.
+
+## Arena variants
+
+When a Release runs in **arena mode**, a message can return multiple model
+variants for side-by-side comparison. Record the user's pick:
+
+```typescript
+await client.chat.selectArena(thread.id, messageId, /* selectedIndex */ 0);
+```
+
+Streaming surfaces variants as they arrive via `onArenaVariant` /
+`onArenaComplete` — see [Streaming](/client/streaming).
+
+## Message shape
+
+Each `ChatMessage` carries:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `id` | `string` | Message id |
+| `role` | `"user" \| "assistant" \| "system"` | |
+| `content` | `string` | The text |
+| `timestamp` | `string` | ISO timestamp |
+| `context` | `ChatMessageContext[]?` | RAG sources, if context bubbles are on |
+| `products` | `ProductRecommendation[]?` | Catalog matches, if any |
+| `tokenCount` | `number?` | |
+| `arenaVariants` | `ArenaResponseVariant[]?` | Present in arena mode |

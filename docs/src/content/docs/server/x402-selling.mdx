@@ -1,0 +1,170 @@
+---
+title: Charging for your agent with x402
+description: Publish a release and charge callers per request in USDC, paid straight to your own wallet.
+---
+
+{/* Rail-key scoping: production 901332cb01 (2026-10-16). Payments tab: prod web
+    a9c021ee7e. Refuse-or-503 for a key that cannot charge: production 0baf5053dc
+    (2026-10-17). See notes/PLAN-X402-SELLER.md. */}
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+This page is for the **seller**: you have built an assistant, published it as a
+release, and want software agents to pay for each call. If you are the caller
+paying for a tool, see [x402 Payments](/server/x402) instead.
+
+x402 revives the HTTP `402 Payment Required` status. A caller that hasn't paid
+gets a `402` describing the price and the wallet to pay. The caller's wallet signs
+a USDC transfer, retries the request, and is served.
+
+## What you need
+
+- A Divinci workspace with a published release.
+- **A wallet address on Base** that you control. Double-check it: USDC sent to a
+  mistyped address cannot be recovered.
+
+You do **not** need a Coinbase, Stripe or Cloudflare account. Payments are verified
+and settled by an x402 facilitator that Divinci calls for you (x402.org on
+`base-sepolia`), and the facilitator pays the gas, so callers pay only your price.
+
+<Aside type="caution" title="Testnet only, for now">
+  Use `base-sepolia`, a test network. `base` (mainnet) can be saved as active but is
+  not supported yet: payments on it will fail. Note that on a test network callers
+  pay with free faucet tokens while your workspace pays real model costs, so keep
+  test keys private and disable the settlement when you are done.
+</Aside>
+
+## How billing is attached
+
+x402 is attached to an **API key**, not to the release:
+
+- Callers must hold the key. Without it they get `401`, not `402`.
+- A key with a payment rail can call **only** `POST /api/v1/chat/completions`.
+  Every other endpoint answers `403` (`PAYMENT_RAIL_KEY_SCOPE`), so a paying
+  caller cannot reach your other data or run un-billed generation.
+- The key's `releaseId` is the **default** release. A caller can still name another
+  release in your workspace in the request body.
+- The key's payment rail is **Crypto (x402)** (`paymentRail: "divinci-x402"`).
+  Keys with no rail are served free.
+- **Price and payee are per workspace**, shared by every x402 key in it.
+
+Today, charging applies to **`POST /api/v1/chat/completions`**.
+
+<Aside type="caution" title="Treat the key like a password">
+  Each paid call costs you model usage, and unpaid attempts count against the
+  key's rate limits, so anyone holding it can run up both. Give it only
+  `transcript:write`, and revoke it if it leaks.
+</Aside>
+
+<Steps>
+
+1. **Publish your release** as usual.
+
+2. **Set where you get paid, and activate.** In the web app, open your
+   workspace, go to **Embed → Payments**, choose the network (`base-sepolia`),
+   paste your wallet address, set a price and the status **Active**, then Save.
+   Or use the API. Each call replaces the whole settlement, so always send every
+   field. Authenticate as a workspace member who can edit configuration.
+
+   ```bash
+   curl -X POST "https://api.divinci.app/white-label/$WHITELABEL_ID/payment-settlement" \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{
+       "railId": "divinci-x402",
+       "status": "active",
+       "network": "base-sepolia",
+       "payTo": "0xYourWalletAddress",
+       "priceUsdOverride": 0.02
+     }'
+   ```
+
+   `priceUsdOverride` is USD per request. Omit it for the platform default
+   (currently $0.01). Use `0` for free, or at least `0.000001`; smaller amounts
+   round to zero on-chain and are rejected. Activation requires `payTo` and
+   `network`.
+
+3. **Create the key, after the settlement is active.** Key creation is refused
+   until it is: you get `409` ("Activate a payment settlement for this workspace
+   before creating a key that charges callers."). In the web key form you can pick
+   the release to pin and set the payment rail to **Crypto (x402)**. The web form
+   does not show the secret on create, so to get a key you can hand out in one step,
+   use the API:
+
+   ```bash
+   curl -X POST "https://api.divinci.app/api/v1/workspaces/$WHITELABEL_ID/api-keys" \
+     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+     -d '{
+       "name": "paid-agent",
+       "releaseId": "YOUR_RELEASE_ID",
+       "paymentRail": "divinci-x402",
+       "permissions": ["transcript:write"]
+     }'
+   ```
+
+   The response holds the key in `secret`. It is shown once, so store it now;
+   if you lose it, rotate the key to get a new one.
+
+   Settlement has to be active first (step 2), because a key that cannot charge is
+   never served for free: it is refused at creation, and a key whose settlement
+   later becomes unusable answers `503`.
+
+4. **Test it.** Call the endpoint with the key and no payment:
+
+   ```bash
+   curl -i -X POST "https://api.divinci.app/api/v1/chat/completions" \
+     -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{ "messages": [{ "role": "user", "content": "hello" }] }'
+   ```
+
+   You should get a `402` whose `accepts[0].payTo` is your address. Check it
+   character by character before going live.
+
+</Steps>
+
+## What a caller sees
+
+```json
+{
+  "x402Version": 1,
+  "error": "X-PAYMENT header is required",
+  "accepts": [{
+    "scheme": "exact",
+    "network": "base-sepolia",
+    "maxAmountRequired": "20000",
+    "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "payTo": "0xYourWalletAddress",
+    "resource": "https://api.divinci.app/…",
+    "description": "Divinci chat completion",
+    "mimeType": "application/json",
+    "maxTimeoutSeconds": 60,
+    "extra": { "name": "USDC", "version": "2" }
+  }]
+}
+```
+
+`maxAmountRequired` is in USDC atomic units (6 decimals), so `20000` is $0.02.
+There is no public price list; a caller learns the price from this `402`. The
+[server SDK](/server/x402) pays it automatically when autopay is on (default cap
+$1 per call).
+
+## Behaviour to know about
+
+- **Draft or missing settlement.** A key cannot be created, and an existing key
+  answers `503` (`payment_rail_unavailable`) rather than serving for free on your
+  account.
+- **Active fails closed.** If your settlement becomes unusable, the endpoint
+  returns `503` rather than serving for free on your account.
+- **Disabled is the one way to stop charging.** Setting the status to Disabled
+  deliberately turns charging off for every x402 key in the workspace, and those
+  keys are then served free. Use it only when you mean it.
+- **Replays are rejected.** Each signed authorization works once.
+- **Payment settles before the answer is generated.** If generation then fails, the
+  caller has paid and there is no automatic refund.
+- **It is extra revenue, not a discount.** Payments do not reduce what your
+  workspace is billed for usage.
+
+## Not available yet
+
+- **Stripe settlement.** Drafted but cannot be activated.
+- **Base mainnet.** Not confirmed end to end.
+- **Other endpoints.** Only `chat/completions` is charged.

@@ -1,0 +1,302 @@
+---
+title: "Safety: Moderation & Flaggers"
+description: "The gate between what a user types and what your model sees — harmful-content moderation, on-topic enforcement, custom moderators, and notification flaggers that escalate a conversation to a human."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+A Release's **Safety** settings decide what reaches the model and what gets
+escalated to a person. There are three, and they do different jobs:
+
+| Control | Field | Job |
+| --- | --- | --- |
+| [Prompt moderation](#prompt-moderation) | `promptModeration` | **Blocks** a message before generation |
+| [De-identification](/server/de-identification/) | `deIdentification` | **Rewrites** a message to strip PII |
+| [Notification flaggers](#notification-flaggers) | `notificationFlaggers` | **Escalates** a conversation to your team |
+
+Moderation blocks, de-identification redacts, flaggers notify — nothing here
+does two of those. This page covers the first and third; de-identification has
+its own page.
+
+## Where they run
+
+```
+user message
+   │
+   ├─▶ de-identify              ← original text ends here
+   ├─▶ RAG retrieval            ← builds the context on-topic is judged against
+   ├─▶ PROMPT MODERATION        ← blocks here, before any generation spend
+   ├─▶ input flaggers           ← notify, do not block
+   ├─▶ model generation
+   └─▶ output flaggers          ← run against the reply
+```
+
+Moderation sees the **redacted** text, not what the user typed — so a custom
+moderator that keys on names or emails will never match once de-identification
+is on. It also runs *after* retrieval, because on-topic moderation is judged
+against the context that retrieval produced.
+
+## Prompt moderation
+
+Three independent checks. A message is blocked if **any** of them trips, and the
+block happens before generation, so a blocked message costs no inference.
+
+### Harmful-message moderation
+
+Runs the message through Llama Guard and blocks anything classified unsafe.
+**On by default** (`noHarmful.on: true`) — unlike every other control on this
+page, this is opt-*out*.
+
+| Code | Category | Waivable |
+| --- | --- | --- |
+| `S1` | Violent Crimes | ⛔ |
+| `S2` | Non-Violent Crimes | ⛔ |
+| `S3` | Sex-Related Crimes | ⛔ |
+| `S4` | Child Sexual Exploitation | ⛔ |
+| `S5` | Defamation | ✅ |
+| `S6` | Specialized Advice | ✅ |
+| `S7` | Privacy | ✅ |
+| `S8` | Intellectual Property | ✅ |
+| `S9` | Indiscriminate Weapons | ⛔ |
+| `S10` | Hate | ⛔ |
+| `S11` | Suicide & Self-Harm | ⛔ |
+| `S12` | Sexual Content | ⛔ |
+| `S13` | Elections | ✅ |
+
+`noHarmful.allowedCategories` waives categories **for this Release only**:
+
+```jsonc
+{ "noHarmful": { "on": true, "title": "Message considered harmful",
+                 "allowedCategories": ["S6"] } }
+```
+
+<Aside type="caution" title="Why S6 usually needs waiving">
+`S6 Specialized Advice` covers medical, legal and financial guidance — which for
+a diagnostics, law, or finance assistant *is* the subject matter. Left blocking,
+the assistant refuses its own domain: a lab tech asking how to clear a
+deck-check error gets *"I can't help with that request. Message considered
+harmful (Specialized Advice)"*. If your Release exists to give specialist
+guidance, waive `S6`.
+</Aside>
+
+Two rules the waiver obeys, both deliberate:
+
+- **The floor cannot be waived.** Codes outside the waivable set are ignored,
+  and the floor is applied at decision time rather than at save time — so a
+  waiver that reaches the database by any route still cannot unblock `S1`/`S4`/
+  `S9`/`S11`.
+- **Every tripped category must be waived.** Waiving `S6` does not excuse a
+  message flagged `S6,S1` — something that is both specialist advice and a
+  violent crime is still a violent crime.
+
+<Aside type="danger" title="Omitting `allowedCategories` silently drops the waiver">
+The config cast keeps only the keys it is told about, so a save that omits
+`allowedCategories` **removes** an existing waiver and still returns `200`. The
+update looks applied and is not — and the symptom appears later, as an assistant
+that has quietly started refusing its own domain again. Always send the full
+`noHarmful` object, including the waiver you want to keep.
+</Aside>
+
+### On-topic moderation
+
+Blocks messages your knowledge base cannot support, judged against the context
+RAG retrieved for that turn. Off by default (both minimums `0`).
+
+| Field | Meaning |
+| --- | --- |
+| `minimumContext` | Minimum number of retrieved context items |
+| `minimumTokens` | Minimum total tokens across those items |
+
+Either being greater than zero turns the check on. A message is blocked when
+retrieval returned **nothing at all**, or fewer items than `minimumContext`, or
+fewer tokens than `minimumTokens`.
+
+<Aside type="caution" title="No RAG vector means no enforcement — silently">
+On-topic is judged against retrieved context, so with no RAG vector attached
+there is nothing to judge and the check **passes everything**. It does not error
+and nothing warns you; the setting simply has no effect. The dashboard locks the
+control until a vector is attached, but a config written through the API can set
+the minimums on a vectorless Release and look configured while enforcing
+nothing. Attach the knowledge base first — see [RAG](/server/rag/).
+</Aside>
+
+### Custom moderators
+
+A custom moderator is its own document: an **assistant**, a **prefix** (your
+instructions — what to look for), and **`outputKeys`** (the boolean fields it
+must return). Attach it to a Release by id and title:
+
+```jsonc
+{ "custom": [{ "id": "<moderatorId>", "title": "Competitor mentions" }] }
+```
+
+At request time the moderator runs against the message and returns its keys. **If
+any key comes back `true`, the message is blocked** — the keys are OR'd, so a
+moderator returning `{ "offTopic": false, "competitorMention": true }` blocks.
+Design each key as "should this be stopped?", not as a neutral observation.
+
+Test one before attaching it:
+
+```bash
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/prompt-moderation/$MODERATOR/test-run \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"prompt":"a message that should trip it"}'
+```
+
+## Notification flaggers
+
+Flaggers watch conversations for patterns and **notify** — they never block. Use
+them for "this conversation needs a human", not for enforcement.
+
+```jsonc
+{
+  "helpRequests": { "enabled": true },
+  "custom": [{ "id": "<flaggerId>", "title": "Escalate: frustrated customer" }]
+}
+```
+
+`helpRequests` is the built-in toggle for users explicitly asking for a human;
+it is **off by default**. Custom flaggers are their own documents, with more
+surface than a moderator:
+
+| Field | Purpose |
+| --- | --- |
+| `assistant`, `prefix`, `outputKeys` | Same shape as a custom moderator |
+| `flagInput` | `true` → runs on the **user's message**; `false` → on the **AI's reply** |
+| `notifyUser` | Whether the end user is told their message was flagged |
+| `notificationMessage`, `notificationIcon` | What your team sees |
+| `notificationTags` | Tags applied to notifications this flagger raises — the handle for routing and filtering |
+
+Flaggers also have a `test-run` route, at
+`/white-label/$WORKSPACE/notification-flagger/$FLAGGER/test-run`.
+
+Delivery, channels and the notification feed itself are covered in
+[Notifications, Analytics & Metrics](/server/observability/).
+
+<Aside type="caution" title="Every custom moderator and flagger is an extra model call">
+Each one runs its own structured-output assistant call **per message** — input
+flaggers against the user's message, output flaggers against the reply — and
+that cost is escrowed alongside the generation. Three custom moderators plus two
+flaggers means five extra model calls on every turn, not five regex matches.
+Consolidate related checks into one moderator with several `outputKeys` rather
+than attaching one moderator per rule.
+</Aside>
+
+## Configuring
+
+Both fields are settable through the SDK, and each also has a dedicated
+endpoint. Either way, you send the **whole** config object: omitted keys revert
+to defaults rather than preserving current values, so read the release first if
+you are changing one setting among several.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  promptModeration: {
+    noHarmful: {
+      on: true,
+      title: "Message considered harmful",
+      allowedCategories: ["S6"],   // omitting this DROPS an existing waiver
+    },
+    onTopic: {
+      title: "Message considered off topic",
+      minimumContext: 1,
+      minimumTokens: 0,
+    },
+    custom: [],
+  },
+  notificationFlaggers: {
+    helpRequests: { enabled: true },
+    custom: [],
+  },
+});
+```
+
+The dedicated endpoints remain useful for two things the SDK path cannot do:
+they work without reading the release first, and `toggle-moderation` flips the
+harmful check alone while preserving everything else. Both refuse drafts.
+
+```bash
+# Prompt moderation — all three keys are REQUIRED, or the request is rejected
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/moderation \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{
+    "noHarmful": { "on": true, "title": "Message considered harmful",
+                   "allowedCategories": ["S6"] },
+    "onTopic":   { "title": "Message considered off topic",
+                   "minimumContext": 1, "minimumTokens": 0 },
+    "custom":    []
+  }'
+
+# Notification flaggers
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/notification-flaggers \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{ "helpRequests": { "enabled": true }, "custom": [] }'
+
+# Harmful moderation on/off only, leaving everything else alone
+curl -X POST \
+  https://api.divinci.app/white-label/$WORKSPACE/release/$RELEASE/toggle-moderation \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"enabled": false}'
+```
+
+`POST /moderation` rejects a body missing any of `noHarmful`, `onTopic`, or
+`custom` — there is no partial update. Use `toggle-moderation` when you only
+want to flip the harmful check, since it preserves the rest.
+
+<Aside type="note" title="Omitting a field still preserves it">
+`releases.updateInWorkspace()` carries the stored `promptModeration` and
+`notificationFlaggers` forward on every save, so an update that does not mention
+them leaves them untouched. Passing a value now overrides that carry-forward —
+which is exactly what these fields could not do before, and why a value passed to
+an older client was accepted and discarded in silence.
+</Aside>
+
+## Failure behaviour
+
+Moderation is **mostly fail-open** — the opposite of de-identification, and a
+deliberate difference: a redaction outage that let PII through would be a
+compliance breach, whereas a moderation outage that blocked everything would
+take the whole assistant down.
+
+| Failure | Result |
+| --- | --- |
+| Moderation service returns a non-OK HTTP status | **Fails open** — message allowed |
+| Network rejection, or an unparseable response body | **Blocks** the message |
+| A custom moderator errors | **Blocks** the message |
+
+So a clean outage of the moderation provider degrades to "no harmful-content
+filtering" rather than to an outage of your Release — but a *messy* one (DNS
+failure, truncated body) blocks. Neither state announces itself to the end user
+beyond the block message, so alert on moderation errors rather than expecting to
+notice.
+
+## Gotchas
+
+- **Harmful moderation is on by default; everything else here is off.** A new
+  Release already blocks unsafe content, and already has zero on-topic
+  enforcement, no custom moderators, and no flaggers.
+- **Moderation sees redacted text.** With de-identification on, a custom
+  moderator keyed on names, emails, or phone numbers will never match — they were
+  replaced before moderation ran.
+- **A blocked message costs nothing; a flagged one costs extra.** Moderation runs
+  before generation, so a block saves the inference spend. Flaggers run in
+  addition to generation, so they only add cost.
+- **`title` is user-visible.** It is the text shown when a message is blocked,
+  with the tripped categories appended for harmful blocks. Write it as something
+  you are willing to show an end user.
+- **Custom moderator and flagger ids are per workspace.** Cloning a Release to
+  another workspace carries the ids but not the documents they point at; a
+  moderator that cannot be found throws, which blocks the message.
+
+## Related
+
+- [Red Teaming](/server/red-team/) — probe whether this layer (and the
+  model behind it) actually holds; `defense.moderationHeld` counts the
+  probes that never reached the model
+- [De-Identification](/server/de-identification/) — the third Safety control
+- [Notifications, Analytics & Metrics](/server/observability/) — where flagger
+  notifications are delivered and read
+- [Security & Abuse Protection](/server/security/) — who may reach a Release at all

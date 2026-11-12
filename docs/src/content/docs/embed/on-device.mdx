@@ -1,0 +1,146 @@
+---
+title: On-Device Inference
+description: Run the LLM on the visitor's own device with the Divinci Local Inference extension — free, private, and grounded by your release.
+---
+
+Divinci can run the language-model call **on the visitor's own device** while your
+release still does all the heavy lifting on the server. The result is a chat that
+is **free** (no per-token inference cost), **private** (the generation never leaves
+the browser), and still **grounded** — RAG retrieval, your persona/system prompt,
+moderation, the signed transcript, and billing all run server-side exactly as they
+do for a cloud turn. Only the model call is delegated to the device.
+
+This is powered by the **Divinci Local Inference** browser extension, which runs
+Google **Gemma 4** in-browser via WebGPU and exposes a small `window.divinci` API
+to the page.
+
+## Delegated inference (the recommended path)
+
+When a page hosts a Divinci embed (the `@divinci-ai/embed-chat-ui` widget or the
+embed script) **and** the visitor has the extension installed, the widget routes
+the turn like this:
+
+1. **Prepare (server)** — the release assembles the prompt: RAG retrieval, persona
+   / system prompt, and input moderation. It returns the assembled
+   `{ role, content }` messages to the widget. No cloud LLM runs.
+2. **Generate (device)** — the widget runs the model call on-device through
+   `window.divinci.chat(...)`. Tokens stream into the bubble.
+3. **Complete (server)** — the release runs its post-generation loops
+   (style-rewrite), an output safety check, then appends and **signs** the turn.
+   No cloud LLM, no AI billing.
+
+Because the release runs the full pipeline, on-device answers are as grounded and
+on-brand as cloud answers — not the "flimsy", context-free replies you'd get from
+a bare local model. The whole flow is automatic; you don't call `window.divinci`
+yourself unless you're building a custom integration.
+
+### Local-first, cloud fallback
+
+The visitor sees an **⚡ on-device** toggle in the widget header whenever the
+extension is present. When on, the widget tries the device first and falls back to
+your cloud release on any local error — unless the admin policy is `prefer`
+(local-only). Gated releases (Free-Chat Gate) are fully supported: the same
+verified token gates the on-device prepare/complete just like a cloud turn.
+
+## Admin control: the `localModel` policy
+
+Release admins choose whether on-device routing is offered, via the release
+config's `localModel` field:
+
+| Value | Behavior |
+| --- | --- |
+| `off` | Always use the cloud release. The on-device toggle is hidden. |
+| `fallback` *(default)* | On-device first when the extension is present and the visitor's toggle is on; cloud on any local error. |
+| `prefer` | On-device only when present (no cloud fallback). |
+
+For `@divinci-ai/embed-chat-ui`, pass it through the mount options
+(`localModel`). The embed script does not take a mount option for this — it
+follows the release config's `localModel` field. The docs site wires it at
+build time via the `PUBLIC_DIVINCI_LOCAL_MODEL` environment variable. An
+unknown value is treated as `fallback`.
+
+## Provenance: on-device turns are marked
+
+A turn generated on-device carries `provenance: "local"` in the signed transcript.
+The release **accepted** the text (and signed it) but did not **author** it, so:
+
+- The embed widget renders a small **⚡ on-device** badge on those turns.
+- If the conversation is handed off into the full app (`chat.divinci.app`), the
+  marker travels with it — an on-device turn is shown as on-device, never laundered
+  into authoritative assistant output.
+
+## The `window.divinci` API (custom integrations)
+
+The extension injects `window.divinci` into the page's main world. For most sites
+the embed widget uses this for you; reach for it directly only when you're building
+your own UI.
+
+```ts
+// Present only when the extension is installed.
+const divinci = (window as any).divinci;
+
+// Probe the extension + the models it can run.
+const { extensionVersion, supportedModels } = await divinci.ping();
+
+// First call from a non-first-party origin triggers the extension's own
+// in-page consent prompt — you don't build it, just call chat().
+const result = await divinci.chat(
+  { messages: [{ role: "user", content: "Hello" }] },
+  {
+    onToken: (delta) => process.stdout.write(delta), // stream
+    signal: abortController.signal,                  // cancel
+  },
+);
+console.log(result.fullText);
+```
+
+Key facts:
+
+- **On-device only.** The open API runs inference on the device; it does not expose
+  your Divinci account, keys, or server tools to the page.
+- **Per-origin consent.** The first `chat()` from a new origin prompts the visitor;
+  you can't force it.
+- **Stateless.** Pass the full `messages` array each call. In delegated mode the
+  release owns the transcript and hands the widget the assembled messages.
+- **Model must be loaded.** If the visitor hasn't loaded the model, `chat()`
+  rejects — the widget falls back to cloud (under `fallback`).
+
+## Bring your own local model (Ollama, vLLM, LM Studio)
+
+Beyond the extension's bundled Gemma 4, the Divinci chat app
+(`chat.divinci.app`) can point at **your own OpenAI-compatible endpoint** — handy
+if you run a larger local model such as **Gemma 4 12B via Ollama**. Pick the
+**Custom / Self-hosted** model in the chat model picker and provide:
+
+- **Base URL** — e.g. `http://localhost:11434` for Ollama
+- **Model name** — e.g. `gemma4:12b`
+- **API key** — leave blank for Ollama / LM Studio
+
+```bash
+# Example: a more powerful Gemma 4 served locally by Ollama
+ollama pull gemma4:12b
+ollama serve   # http://localhost:11434
+```
+
+:::caution[localhost from a deployed site]
+A deployed `https://` page **cannot** reach `http://localhost` directly — Chrome's
+Private Network Access blocks it. To use a localhost model (Ollama / LM Studio),
+use the **Divinci Local Inference extension** or **Divinci Desktop** to bridge it,
+or expose a **public `https://` endpoint** that allows the page's origin via CORS
+(Ollama: `OLLAMA_ORIGINS`; LM Studio: enable CORS).
+:::
+
+## Privacy & safety
+
+- **Generation stays on the device.** Prompt content is generated in the browser;
+  the release still sees the prompt at prepare time (it must, to retrieve RAG and
+  moderate input), so the honest framing is "generation runs on your device."
+- **Output is still moderated.** On-device output runs through a harmful-content
+  check before it is signed and persisted. This check **fails open** — if the
+  moderation service is unavailable the turn is allowed (and flagged), so an
+  outage never silently blocks on-device chat.
+- **Per-origin consent** is enforced by the extension for every site that calls
+  `chat()`.
+
+See the [privacy policy](https://divinci.ai/privacy-policy/) for how the Divinci
+Local Inference extension handles data.

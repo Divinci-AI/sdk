@@ -1,0 +1,241 @@
+---
+title: "Provider Keys (BYOK) & Skills"
+description: "Register your own provider credentials, and create the skill instances a Release's tool loop calls — the two prerequisites most other configuration assumes you have already done."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Two setup flows that other pages point at:
+
+- **BYOK** — your own credentials for a third-party provider (OpenAI, Deepgram,
+  ElevenLabs, Anthropic…), stored per workspace. Needed before a Release can use
+  a provider Divinci does not front with its own key.
+- **Skills** — instances of Divinci's built-in integrations (calendar, email,
+  SMS, web search). A Release's tool loop attaches them **by instance id**, so
+  the instance has to exist first.
+
+They are independent — most skills need no BYOK — but they are both "do this
+before the thing you actually wanted to configure".
+
+## BYOK: your own provider keys
+
+A BYOK record is one credential for one provider, scoped to one workspace.
+**31 of the 33 providers accept one** (the exceptions are `divinci` and `redis`,
+which are platform infrastructure).
+
+```typescript
+// The credential's shape is per provider — openai wants apiKey (+ optional
+// organization), others want different fields entirely.
+const key = await divinci.byok.create(workspaceId, {
+  name: "Production OpenAI",
+  providerId: "openai",
+  auth: { apiKey: "sk-...", organization: "org-..." },
+});
+
+const { page, total } = await divinci.byok.list(workspaceId, { providerId: "openai" });
+await divinci.byok.update(workspaceId, key._id, { available: false }); // metadata only
+await divinci.byok.delete(workspaceId, key._id);
+```
+
+<Aside type="tip" title="A bad key fails at save, not at 3am">
+`create()` and `rotate()` validate the credential against the **provider's live
+endpoint** before persisting — the OpenAI provider, for instance, calls
+`models.list()`. An invalid key is rejected at the point you enter it, rather
+than surfacing later as a Release that has quietly stopped producing audio. The
+per-provider field list comes from that provider's own auth schema, which is why
+the dashboard form changes shape as you pick a provider.
+</Aside>
+
+### Rotating
+
+Rotation replaces the credential **in place**, keeping the record's id:
+
+```typescript
+await divinci.byok.rotate(workspaceId, key._id, {
+  auth: { apiKey: "sk-new-value..." },
+});
+```
+
+Nothing that references the key needs re-pointing — RAG vectors, releases, and
+tools all hold the BYOK **id**, not the secret. Use `rotate()` rather than
+delete-and-recreate, which would orphan every consumer.
+
+### What is never returned
+
+The stored credential is encrypted at rest and **never** comes back from the
+API. A record returns metadata only: `name`, `providerId`, `available`,
+timestamps, and a `keyPreview` (a masked fragment, enough to tell two keys
+apart). There is no endpoint that reads a workspace provider key back out.
+
+### When a key is required
+
+A tool declares which provider it needs, and whether it can use Divinci's key:
+
+| `useBYOK` | Meaning |
+| --- | --- |
+| *unset* | Either Divinci's platform key or yours |
+| `"divinci-only"` | Platform key only — BYOK is ignored |
+| `"byok-only"` | **Your key is mandatory**; the tool cannot run without one |
+
+Around seventeen tools are `byok-only` today — chiefly the Vertex-hosted
+third-party models (Grok, Qwen, Kimi, GLM, Jamba) and the Vertex Gemini
+fine-tuners. Selecting one of these without a matching BYOK record leaves it
+non-functional. For voice specifically, the Cloudflare-hosted TTS/STT options
+run on the platform key while OpenAI Whisper, Deepgram, ElevenLabs and Cartesia
+bill to yours — see
+[Channels & Access → Voice](/server/channels-access/#voice-tts--stt).
+
+<Aside type="note" title="There is a second, unrelated BYOK API">
+`/api/v1/byok` is a different system that shares the name: a **per-end-user**
+key vault built for partner SDK consumers, with its own `byok:read` /
+`byok:write` / `byok:resolve` scopes, per-key rate limits, and an access audit
+log. It supports envelope encryption — the caller wraps the secret with their
+own key and Divinci stores ciphertext it **cannot** decrypt, which is what lets a
+partner run inference at their own edge. Cross-tenant reads return `404` rather
+than `403`, so the API is not an existence oracle.
+
+`divinci.byok.*` is the workspace-provider-credential system on this page, not
+that one. Reach for `/api/v1/byok` only if you are storing *your end users'*
+keys.
+</Aside>
+
+## Skills: creating an instance
+
+A **catalog integration** is the Divinci-authored thing (`google-calendar`,
+`web-search`). A **skill instance** is your configured copy of it. Releases
+attach instances, never catalog entries.
+
+```typescript
+// 1. See what exists
+const catalog = await divinci.skills.listCatalog();
+//    → [{ id: "google-calendar", label, authType: "oauth2", actions: [...], available }]
+
+// 2. Create your instance
+const skill = await divinci.skills.create({
+  integrationId: "google-calendar",
+  title: "Clinic bookings",
+  instanceDescription: "Books 30-minute consults on the clinic calendar",
+});
+
+// 3. skill.id is what a Release attaches
+```
+
+Each catalog entry advertises its `authType` (`oauth2` / `api-key` / `basic`),
+its actions with their JSON Schemas, whether each action `mutates`, and an
+`available` flag — an entry with `available: false` is present in the catalog but
+not runnable.
+
+### Connecting an OAuth skill
+
+Three calls, with your redirect in the middle:
+
+```typescript
+const { authorizeUrl, state } = await divinci.skills.startConnect(
+  skill.id,
+  "https://yourapp.example.com/oauth/callback",
+);
+// send the user to authorizeUrl; they come back with ?code=...
+
+await divinci.skills.finishConnect(skill.id, {
+  code,
+  state,                                              // the state from startConnect
+  redirectUri: "https://yourapp.example.com/oauth/callback", // must MATCH exactly
+});
+
+await divinci.skills.disconnect(skill.id); // revoke later
+```
+
+The `redirectUri` passed to `finishConnect` must be identical to the one given
+to `startConnect` — providers bind the authorization code to it, and a mismatch
+fails the exchange.
+
+Read connection state off the instance:
+
+| `connection` | Meaning |
+| --- | --- |
+| `connected` | Ready |
+| `expired` | Was connected; token needs refreshing — reconnect |
+| `disconnected` | Never connected, or revoked |
+| `not-required` | This integration needs no auth |
+
+<Aside type="caution" title="`enabled` and `connection` are different things">
+An instance can be `enabled: true` while its `connection` is `expired` — the
+Release will happily advertise the skill to the model, and its actions will fail
+at call time. Check `connection` after creating an instance and before trusting
+a release config, and treat `expired` as an alert rather than a state that
+recovers itself.
+</Aside>
+
+### Per-instance tool overrides
+
+`toolOverrides` adjusts individual actions without forking the integration:
+
+```typescript
+await divinci.skills.update(skill.id, {
+  toolOverrides: {
+    bookAppointment: {
+      confirmationMessage: "Book {dateTime} for {durationMinutes} minutes?",
+      requireConfirmation: true,
+    },
+  },
+});
+```
+
+`requireConfirmation: true` **adds** a confirmation stop to an action that would
+not otherwise have one — useful for the self-directed actions (`email-release`,
+`sms-release`) that skip the automatic floor. It cannot remove confirmation from
+a mutating action; that floor is enforced server-side.
+
+### Attaching to a Release
+
+Attaching is a **Release** update, not a skills call:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  skillConfig: {
+    enabled: true,
+    catalogSkills: { [skill.id]: ["bookAppointment", "getAvailabilities"] },
+  },
+});
+
+// read back what a release has attached
+const attached = await divinci.skills.listForRelease(releaseId);
+```
+
+<Aside type="danger" title="Three ways an attached skill silently does nothing">
+Each of these returns `200` and leaves you with an assistant that describes
+actions it cannot perform:
+
+1. **`skillConfig.enabled` is false.** The loop never runs, whatever is attached.
+2. **You used the catalog id.** `catalogSkills` is keyed by the **instance** id
+   from `create()`, not `"google-calendar"`. The CLI rejects a value shaped like
+   a catalog id; the API rejects an instance that is not ready or belongs to
+   another workspace.
+3. **The instance is not connected.** `enabled: true` with `connection:
+   "expired"` advertises the tool and fails at call time.
+</Aside>
+
+Full loop configuration — the tool-calling model, iteration caps, MCP skills, and
+the confirmation model — is on
+[Assistant Tools](/server/tools/#skilltool-loop-in-chat-tools).
+
+## Gotchas
+
+- **BYOK is per workspace; skills instances are per workspace.** Cloning a
+  Release into another workspace carries the *ids* but not the records they point
+  at. Re-create both on the destination side.
+- **`available: false` on a BYOK record does not delete it.** It withdraws the
+  key from selection while keeping it (and its id) intact — the reversible way to
+  take a credential out of service.
+- **A skills catalog entry is not a promise.** `available: false` means present
+  but not runnable; check it before building a flow around an integration.
+- **`email-user` cannot be a workspace instance.** It resolves recipients from
+  the *acting user's* identity, so it is refused on the release side and exists
+  only as a user-owned skill. Release-owned emailing is `email-release`.
+
+## Related
+
+- [Assistant Tools](/server/tools/) — the tool loop that calls these skills
+- [Channels & Access](/server/channels-access/) — the Release settings that
+  consume provider keys
+- [Workspaces](/server/workspaces/) — where both records live

@@ -1,0 +1,71 @@
+---
+title: MCP Resources
+description: Read resources and prompts exposed by the Divinci MCP server
+---
+
+
+In addition to invokable tools, the MCP server can expose **resources** (static or generated data identified by a URI) and **prompts** (reusable prompt templates).
+
+## Listing resources
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const client = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+});
+
+await client.connect();
+
+const resources = await client.listResources();
+for (const resource of resources) {
+  console.log(`${resource.uri} — ${resource.name}`);
+}
+```
+
+## Reading a resource
+
+```typescript
+const { contents } = await client.readResource("divinci://workspace/ws_abc123/runbook.md");
+
+for (const part of contents) {
+  if (part.text) {
+    console.log(part.text);
+  }
+}
+```
+
+## Resource shape
+
+| Field | Type | Description |
+|--------|------|-------------|
+| `uri` | `string` | Unique resource URI |
+| `name` | `string` | Human-readable name |
+| `description` | `string?` | Optional description |
+| `mimeType` | `string?` | Optional MIME type |
+
+## Prompts
+
+Prompts are reusable templates the server publishes. List and fetch them with `listPrompts()` and `getPrompt()`:
+
+```typescript
+const prompts = await client.listPrompts();
+
+const filled = await client.getPrompt("summarize_thread", {
+  thread_id: "thr_abc123",
+  style: "executive",
+});
+
+for (const message of filled.messages) {
+  console.log(message.role, message.content);
+}
+```
+
+## Reacting to changes
+
+The server pushes a `notifications/resources/list_changed` event when its resource catalog changes. Subscribe via the `onResourcesChanged` event to refresh your local list automatically.
+
+## Related
+
+- [Tools](/mcp/tools) — invoke server-exposed actions
+- [Overview](/mcp/overview) — connection, auth, and configuration

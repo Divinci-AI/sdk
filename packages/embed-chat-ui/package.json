@@ -1,0 +1,77 @@
+{
+  "name": "@divinci-ai/embed-chat-ui",
+  "version": "0.3.1",
+  "description": "Framework-agnostic, embeddable chat widget for a Divinci AI Release — the open-source 'Ask Divinci' docs assistant. Mount with one call; no React.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && pnpm run build:standalone",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "pnpm run build",
+    "build:standalone": "esbuild dist/index.js --bundle --format=esm --platform=browser --outfile=dist/standalone/divinci-embed.js",
+    "prepack": "node ../../scripts/assert-packed-deps.mjs"
+  },
+  "dependencies": {
+    "@divinci-ai/client": "workspace:*"
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "esbuild": "^0.25.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "divinci",
+    "ai",
+    "chat",
+    "widget",
+    "embed",
+    "docs",
+    "rag",
+    "assistant"
+  ],
+  "author": "Divinci AI <engineering@divinci.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Divinci-AI/sdk.git"
+  },
+  "homepage": "https://sdk.divinci.ai",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "bugs": {
+    "url": "https://github.com/Divinci-AI/sdk/issues"
+  }
+}

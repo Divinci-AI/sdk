@@ -1,0 +1,109 @@
+---
+/**
+ * One page per changelog entry, so each has its own Open Graph image.
+ *
+ * ═══ WHY PAGES EXIST WHEN THE INDEX ALREADY HAS ANCHORS ═══
+ *
+ * `/changelog/#some-entry` works and is still the canonical way to point at an
+ * entry in context. But a fragment is not part of what a link unfurler fetches:
+ * every `#…` on the index resolves to the SAME document, so Slack, LinkedIn and
+ * X all show one shared picture no matter which change you linked. A per-entry
+ * preview needs a per-entry URL.
+ *
+ * The index anchors are unchanged and still work — those URLs were published
+ * before these pages existed, and breaking them to add a feature would be a bad
+ * trade.
+ *
+ * Rendered through StarlightPage so these keep the docs chrome — nav, search,
+ * theme, the assistant — instead of being an unstyled island off the side of
+ * the site.
+ */
+import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
+import { CHANGELOG } from "../../data/changelog";
+
+export function getStaticPaths() {
+  return CHANGELOG.map((entry) => ({ params: { id: entry.id }, props: { entry } }));
+}
+
+const { entry } = Astro.props;
+const site = "https://sdk.divinci.ai";
+const url = `${site}/changelog/${entry.id}/`;
+const image = `${site}/og/pages/changelog/${entry.id}.png`;
+
+const pretty = new Date(`${entry.date}T00:00:00Z`).toLocaleDateString("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+  // UTC explicitly: otherwise the build machine's zone decides the date, and an
+  // entry near midnight renders differently depending on where it was built.
+  timeZone: "UTC",
+});
+
+// Absolute URLs throughout. A relative og:image is ignored by most unfurlers,
+// which then fall back to the site-wide default — the exact failure these pages
+// exist to fix, and one that looks like success in a browser.
+const head = [
+  { tag: "meta", attrs: { property: "og:image", content: image } },
+  { tag: "meta", attrs: { property: "og:image:width", content: "1200" } },
+  { tag: "meta", attrs: { property: "og:image:height", content: "630" } },
+  { tag: "meta", attrs: { property: "og:type", content: "article" } },
+  { tag: "meta", attrs: { property: "og:url", content: url } },
+  { tag: "meta", attrs: { property: "article:published_time", content: entry.date } },
+  { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+  { tag: "meta", attrs: { name: "twitter:image", content: image } },
+  { tag: "link", attrs: { rel: "canonical", href: url } },
+];
+---
+
+<StarlightPage
+  frontmatter={{
+    title: entry.title,
+    description: entry.body.slice(0, 160),
+    tableOfContents: false,
+    head,
+  }}
+>
+  <p class="cl-meta">
+    <span class="cl-cat">{entry.category}</span>
+    <time datetime={entry.date}>{pretty}</time>
+  </p>
+
+  <p>{entry.body}</p>
+
+  {entry.docs && (
+    <p>
+      <a href={entry.docs}>Read the docs →</a>
+    </p>
+  )}
+
+  <hr />
+
+  <p class="cl-back">
+    <a href="/changelog/">← All changes</a>
+    {" · "}
+    <a href={`/changelog/#${entry.id}`}>See it in context</a>
+  </p>
+</StarlightPage>
+
+<style>
+  .cl-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+  .cl-cat {
+    font-size: var(--sl-text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+    background: var(--sl-color-accent-low);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+  }
+  .cl-back {
+    font-size: var(--sl-text-sm);
+  }
+</style>

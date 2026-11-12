@@ -1,0 +1,77 @@
+---
+/**
+ * A YouTube embed for docs pages.
+ *
+ * Uses youtube-nocookie.com so a reader who never presses play is not handed a
+ * tracking cookie, and `loading="lazy"` so the player payload is not fetched
+ * until the embed is near the viewport — several of these pages are long.
+ *
+ * The 16:9 box is held open by `aspect-ratio` on the wrapper rather than the
+ * old padding-top trick, so the frame never collapses before the iframe loads.
+ */
+interface Props {
+  /** YouTube video id — the part after `youtu.be/` or `?v=`. */
+  id: string;
+  /** Accessible title for the iframe. Required: an unlabelled frame is opaque to screen readers. */
+  title: string;
+  /** Optional caption rendered under the player. */
+  caption?: string;
+}
+
+const { id, title, caption } = Astro.props;
+---
+
+<figure class="yt">
+  <div class="yt-frame">
+    <iframe
+      src={`https://www.youtube-nocookie.com/embed/${id}`}
+      title={title}
+      loading="lazy"
+      {/* Only what playback needs. YouTube's copy-paste default also asks for
+          accelerometer + gyroscope (360°/VR video, which we do not embed),
+          clipboard-write (the share menu's copy button) and web-share (the OS
+          share sheet) — none of which a reader needs in order to watch. */}
+      allow="autoplay; encrypted-media; picture-in-picture"
+      allowfullscreen
+      referrerpolicy="strict-origin-when-cross-origin"></iframe>
+  </div>
+  {
+    caption && (
+      <figcaption>
+        {caption}{" "}
+        <a href={`https://www.youtube.com/watch?v=${id}`} target="_blank" rel="noopener">
+          Watch on YouTube
+        </a>
+      </figcaption>
+    )
+  }
+</figure>
+
+<style>
+  .yt {
+    margin: 1.5rem 0;
+  }
+  .yt-frame {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.6rem;
+    overflow: hidden;
+    background: var(--sl-color-black);
+  }
+  .yt-frame iframe {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+  }
+  figcaption {
+    margin-top: 0.5rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+  figcaption a {
+    color: var(--sl-color-accent-high);
+  }
+</style>

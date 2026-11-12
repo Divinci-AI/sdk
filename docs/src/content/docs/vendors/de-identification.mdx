@@ -1,0 +1,46 @@
+---
+title: De-identification
+description: The two PII detection engines behind Divinci de-identification — Microsoft Presidio and Stanford NER — and how they differ.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Two engines, one contract. Both are run by Divinci — neither needs a key of
+your own.
+
+| Engine | Vendor | Role | `hybrid` strategy |
+| --- | --- | --- | --- |
+| `presidio` | [Microsoft Presidio](https://microsoft.github.io/presidio/) | **Default.** The more accurate detector | Implements the real mix — pseudonymise some categories, redact others |
+| `stanford` | [Stanford NER](https://nlp.stanford.edu/software/CRF-NER.html) | Fallback | Treats `hybrid` as plain `redact` |
+
+If the configured engine fails at request time, the other is tried. The
+consequence worth knowing before you rely on it: a release that fails over from
+Presidio to Stanford **changes redaction style mid-incident** — safely, in the
+more conservative direction, but the output looks different.
+
+<Aside type="danger" title="De-identification fails CLOSED">
+If neither engine can be reached, messages are rejected with a `503` rather than
+passed through un-redacted. That is the correct trade for the feature — an
+assistant that silently stops redacting is worse than one that stops answering —
+but it means the engines are on the critical path of every message for a release
+that enables it.
+</Aside>
+
+<Aside type="caution" title="Detectors are tuned for general prose, and your domain may not be">
+Presidio's default entity set is aggressive, and in specialised corpora it
+removes terms that are not identifiers at all — in a nutrition corpus, for
+example, vitamin and compound names and some food terms match its patterns.
+Always read redacted output from a sample of your own content before enabling it
+on a live release; the damage is invisible in aggregate metrics.
+</Aside>
+
+<Aside type="tip" title="Removing a chunk is a weak remedy on its own">
+If PII has already been ingested, deleting the offending chunks moves the
+needle less than expected, because identifiers recur across a corpus. Treat
+re-ingestion with de-identification on as the actual fix.
+</Aside>
+
+## See also
+
+- [De-Identification (PII)](/server/de-identification/) — configuration, strategies, categories and failure behaviour in full.
+- [Practice Better connector](/cli/connectors/practice-better/) — the connector that de-identifies before indexing.

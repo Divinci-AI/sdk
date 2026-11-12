@@ -1,0 +1,90 @@
+---
+title: Arena
+description: A/B test model variants side-by-side and capture user preferences.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+**Arena** runs multiple model/prompt variants for the same message so you can
+compare them side-by-side and learn which your users prefer. `divinci.arena`
+controls arena for a workspace; presets live under `divinci.arena.presets`.
+
+## Enabling arena
+
+```typescript
+await divinci.arena.enable("ws_123", {
+  // variant definitions: which models/prompts to compare
+});
+
+// later
+await divinci.arena.disable("ws_123");
+```
+
+## Reading results
+
+```typescript
+const results = await divinci.arena.getResults("ws_123");
+```
+
+## Recording a user's choice
+
+When a user picks a winning variant in chat or a transcript:
+
+```typescript
+// In a chat thread
+await divinci.arena.selectChatVariant(chatId, messageId, /* selectedIndex */ 0);
+
+// In a workspace transcript
+await divinci.arena.selectTranscriptVariant("ws_123", transcriptId, messageId, 1);
+
+// Regenerate a single variant with a specific assistant
+await divinci.arena.regenerateVariant("ws_123", transcriptId, messageId, /* variantIndex */ 2, assistantId);
+```
+
+## Testing and cost
+
+```typescript
+// Dry-run a configuration
+const test = await divinci.arena.test("ws_123", { /* test body */ });
+
+// Estimate cost before enabling
+const estimate = await divinci.arena.costEstimate("ws_123", { /* body */ });
+
+// Routing estimate (QA integration)
+const routing = await divinci.arena.routingEstimate("ws_123", { /* body */ });
+```
+
+## Presets
+
+A **preset** is a reusable arena configuration you can save, activate, and share
+across workspaces via export/import.
+
+```typescript
+const presets = await divinci.arena.presets.list("ws_123");
+
+const preset = await divinci.arena.presets.create("ws_123", { /* config */ });
+await divinci.arena.presets.update("ws_123", preset._id, { /* changes */ });
+await divinci.arena.presets.activate("ws_123", preset._id);
+
+// Portability
+const exported = await divinci.arena.presets.export("ws_123", preset._id);
+const imported = await divinci.arena.presets.import("ws_123", exported);
+
+// Per-preset results
+const presetResults = await divinci.arena.presets.getResults("ws_123", preset._id);
+
+await divinci.arena.presets.delete("ws_123", preset._id);
+```
+
+## Method reference
+
+| Group | Methods |
+|-------|---------|
+| `arena` | `enable`, `disable`, `getResults`, `selectChatVariant`, `selectTranscriptVariant`, `regenerateVariant`, `test`, `testSelect`, `costEstimate`, `routingEstimate` |
+| `arena.presets` | `list`, `create`, `update`, `delete`, `activate`, `export`, `import`, `getResults` |
+
+<Aside type="note">
+  Client-side, the same selection actions are available on
+  <a href="/client/namespaces">`client.arena`</a> so your chat UI can record
+  variant picks directly.
+</Aside>

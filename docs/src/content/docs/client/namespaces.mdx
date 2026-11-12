@@ -1,0 +1,161 @@
+---
+title: Namespaces
+description: The full set of operation groups on the Client SDK.
+---
+
+Beyond [chat](/client/chat), [streaming](/client/streaming),
+[realtime](/client/realtime), and [RAG](/client/rag), the client exposes several
+more namespaces. Each is lazily initialized — accessing `client.user`, for
+example, constructs that namespace on first use.
+
+## User
+
+`client.user` — the signed-in user's account surface.
+
+| Sub-namespace | Methods | Purpose |
+|---------------|---------|---------|
+| `user.balance` | `get()` | Current wallet balance. |
+| `user.payment` | `listMethods()`, `deposit(body)`, `getTransactions(range?)` | Payment methods and history. |
+| `user.preferences.audio` | `get()`, `update(prefs)` | Audio tool preferences. |
+| `user.savedReleases` | `get()`, `add(releaseId)`, `remove(releaseId)` | Bookmarked Releases. |
+
+```typescript
+const balance = await client.user.balance.get();
+await client.user.savedReleases.add("rel_abc123");
+```
+
+## API keys
+
+`client.apiKeys` — manage workspace-scoped API keys from the client.
+
+`create(params, body)`, `list(params?)`, `get(params)`, `update(params, body)`,
+`delete(params)`, `rotate(params)`, `listUsers(params)`.
+
+```typescript
+const created = await client.apiKeys.create({ workspaceId: "ws_123" }, { name: "CI key" });
+```
+
+## BYOK (bring your own key)
+
+`client.byok` — register and rotate your own model-provider credentials.
+
+`create(params, body)`, `list(params?)`, `get(params)`, `updateMeta(params, body)`,
+`rotate(params, body)`, `delete(params)`.
+
+## Audio
+
+`client.audio` — upload and manage audio transcripts, and turn them into RAG or
+fine-tune material.
+
+Top-level: `upload`, `uploadFromUrl`, `list`, `get`, `update`, `generateRagFile`,
+`generateFineTuneFile`, `delete`. Plus `audio.voiceprints` and `audio.bulk`
+sub-namespaces.
+
+```typescript
+const transcript = await client.audio.uploadFromUrl(
+  { workspaceId: "ws_123" },
+  { url: "https://example.com/call.mp3" },
+);
+```
+
+## Arena
+
+`client.arena` — model A/B comparison. Enable/disable, fetch results, select
+chat/transcript variants, regenerate a variant, run tests, and estimate cost.
+Presets live under `client.arena.presets`. See the
+[server Arena page](/server/arena) for the full conceptual model.
+
+## Fine-tune
+
+`client.fineTune` — create and manage fine-tunes and their training files from
+the client. `create`, `list`, `get`, `update`, `fork`, `delete`, plus
+`fineTune.files` (`upload`, `list`, `get`, `getContents`, `delete`).
+
+## Style patterns
+
+`client.stylePattern` — manage tone/style rewrite rules: list active and proposed
+rules, test a rewrite, approve/reject proposals, toggle rules, and read the audit
+log.
+
+## Notifications
+
+`client.notifications` — per-workspace notification feed.
+
+`list`, `get`, `markAsRead`, `setTags`, `getCounts`, `getTags`, plus
+sub-namespaces: `notes(...)` for annotation, `channels(...)` for email/webhook
+delivery, `triggers(...)` for tag-routing rules, and `flaggers(...)` for
+custom LLM-driven notifications.
+
+```typescript
+const counts = await client.notifications.getCounts({ workspaceId: "ws_123" });
+```
+
+See [Notifications, Analytics & Metrics](/client/observability) for the full
+custom-notification pipeline (flagger → trigger → channel), product analytics,
+and pipeline-metrics alerting.
+
+## Analytics & Metrics
+
+`client.analytics` — product analytics (metrics, trends, experiments, funnel,
+`trackEvents` ingestion). `client.metrics` — pipeline telemetry + custom alert
+configs. Both documented on the
+[observability page](/client/observability).
+
+## Terms of Service
+
+`client.terms` — check and accept a release's published Terms of Service
+(message sends are blocked server-side until the current version is accepted):
+
+| Namespace | Methods | Purpose |
+| --- | --- | --- |
+| `terms` | `getForRelease({ releaseId? })`, `accept({ tosId, version, releaseId? })` | Fetch the ToS gate for a release; record acceptance for the authenticated identity. |
+
+```typescript
+const gate = await divinci.terms.getForRelease({ releaseId });
+if (gate.required) {
+  // present gate.title / gate.content to the user, then:
+  await divinci.terms.accept({ tosId: gate.tosId!, version: gate.version! });
+}
+```
+
+## Feedback
+
+`client.feedback` — the operator's **read** side of message feedback (consumers
+submit it via `client.chat.submitFeedback`): `list(filters?)`, `stats()`,
+`get(params)`, plus `withWorkspace(workspaceId)` to bind a workspace. Documented
+in full on the [observability page](/client/observability#message-feedback).
+
+## Site control
+
+`client.siteControl` — execute the navigation/action directives a deployed
+assistant emits (`divinci-action` blocks), same-origin. Fetch action descriptors
+with `loadDescriptors(releaseId)` (or `setDescriptors(...)` from
+`freeChatGate.getConfig().siteActions`), register handlers with
+`registerHandler(name, handler)`, then run each assistant reply through
+`process(reply)` to strip the directive block and perform the action. Helpers:
+`prepare(reply)`, `setConfirm(fn)`, `setAutoSubmit(enabled)`,
+`setNavigator(fn)`. See [Assistant Tools](/server/tools) for the server-side
+`siteControl` release config that gates this.
+
+```typescript
+await divinci.siteControl.loadDescriptors(releaseId);
+const { reply } = await divinci.freeChatGate.send("take me to pricing");
+const { cleanedText } = await divinci.siteControl.process(reply); // navigates
+```
+
+## Public / gated chat
+
+Three namespaces power unauthenticated chat experiences:
+
+- `client.anonymousChat` — generic anonymous chat against a release with
+  `allowAnonymousChat: true` — no account, no email gate. `send(prompt)`,
+  `sendDelegated(...)` (on-device inference), `getTranscript()`,
+  `createHandoff(opts?)`, `hydrate(...)`, `getState()`, `reset()`. This is the
+  public release-backed chat used by embed / docs-assistant widgets.
+- `client.homepageChat` — Turnstile-gated email verification then send:
+  `verifyEmail(email, turnstileToken)`, `confirmEmail(email, code)`, `send(prompt)`.
+- `client.freeChatGate` — the configurable free-chat gate (captcha / OTP /
+  magic-link) with language support: `start(args)`, `verifyOtp(args)`, `state()`,
+  `send(prompt)`, `submitFeedback(...)`, plus token and transcript helpers.
+
+These back the [Embed script](/embed/overview) and Divinci's own landing pages.

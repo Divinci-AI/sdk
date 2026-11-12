@@ -1,0 +1,221 @@
+---
+title: Chat CTAs
+description: Show a contextual call-to-action card inline in a chat reply — link out to your funnel, or capture the lead with an email-gated download.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+A **Chat CTA** is a call-to-action card the assistant renders *inside* a reply
+when the conversation earns it. Instead of a banner that shows to everyone, the
+card appears only when the answer actually touches your offer — so the pitch
+lands in context, right after a relevant answer.
+
+![A Chat CTA card rendered inline beneath an assistant reply about Delaware Statutory Trusts, offering a free apartment-owner wealth playbook](/images/chat-cta-example.png)
+
+Above: a visitor asked about real-estate investing, the assistant answered, and
+because the reply mentioned the configured trigger topics the CTA card appeared
+underneath it — title, teaser, thumbnail, and a button.
+
+## The two kinds
+
+<Tabs>
+<TabItem label="link-out">
+The button opens `targetUrl` in a new tab (with a `ref=divinci` parameter
+appended). Your own landing page handles capture, consent and delivery — no
+lead infrastructure needed on the Divinci side. This is the simplest option and
+the one shown in the screenshot above.
+</TabItem>
+<TabItem label="email-gated-download">
+The card renders an inline lead-capture form **in the chat**. On a successful
+submit Divinci stores the lead, syncs it to the Release's CRM config, and only
+then returns `assetUrl`.
+
+<Aside type="caution" title="The gate is real">
+`assetUrl` is never included in the message the client receives — it comes back
+only in the submit response, after a successful capture. Reading the transcript
+cannot reveal the gated file.
+</Aside>
+</TabItem>
+</Tabs>
+
+## When the card fires
+
+A CTA fires only when **all** of these hold:
+
+1. The Release references the CTA (`chatCTA: { id }`).
+2. The CTA doc is `active`.
+3. The cadence rules below say yes for this reply.
+
+Cadence is owner-set; every field is optional and the defaults reproduce the
+original behavior (keyword match, once per conversation):
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `triggerMode` | `keywords`, `interval`, or `keywords-or-interval` | `keywords` |
+| `triggerKeywords` | Case-insensitive **substring** match against the reply text; first hit wins | — |
+| `intervalMessages` | Fire every Nth assistant reply (interval modes) | — |
+| `minMessagesBeforeFirst` | Never fire before the Nth reply | — |
+| `maxPerThread` | Total fires allowed in one conversation | `1` |
+| `cooldownMessages` | Minimum replies between two fires | — |
+
+<Aside type="tip" title="Keywords match the ANSWER, not the question">
+Trigger keywords are scanned against the assistant's generated reply, not the
+visitor's message. That's usually what you want — the card follows what was
+actually discussed — but it means a keyword only your visitors would phrase
+(and your assistant never would) will never fire. Author phrases your assistant
+plausibly writes, like `1031` or `multifamily`.
+</Aside>
+
+Matching is substring, not word-boundary, so a short stem like `invest` also
+catches "investing" and "investment". Narrow it with a longer phrase when that
+is too eager.
+
+## Where CTAs render
+
+CTAs fire on **both** chat surfaces:
+
+- **Anonymous / embed chat** — visitors on your website through the embed
+  script, including behind the Free-Chat Gate. This is the primary lead-capture
+  audience.
+- **Signed-in chat** — authenticated transcripts in the web client.
+
+## Configure one
+
+<Steps>
+
+1. **Create the CTA and attach it to a Release.** Every surface below writes the
+   same whitelabel-scoped sub-document and points the Release at it.
+
+   <Tabs>
+   <TabItem label="CLI">
+   ```bash
+   divinci release update <releaseId> --chat-cta '{
+     "title": "Interested in real estate investing?",
+     "teaserText": "Download our free guide — The California Apartment Owner'"'"'s Wealth Playbook.",
+     "buttonLabel": "Get instant access",
+     "triggerKeywords": ["real estate investing", "1031", "multifamily", "cap rate"],
+     "ctaType": "link-out",
+     "targetUrl": "https://lp.example.com/playbook",
+     "active": true
+   }'
+   ```
+   </TabItem>
+   <TabItem label="Server SDK">
+   ```ts
+   import { DivinciServer } from "@divinci-ai/server";
+
+   const client = new DivinciServer({ apiKey: process.env.DIVINCI_API_KEY });
+
+   await client.releases.updateInWorkspace(workspaceId, releaseId, {
+     chatCTA: {
+       title: "Interested in real estate investing?",
+       teaserText: "Download our free guide.",
+       buttonLabel: "Get instant access",
+       triggerKeywords: ["real estate investing", "1031", "multifamily"],
+       ctaType: "link-out",
+       targetUrl: "https://lp.example.com/playbook",
+       active: true,
+     },
+   });
+   ```
+
+   `updateInWorkspace` GET-then-merges the full Release, creates the CTA
+   sub-document, and points the Release at it in one call.
+   </TabItem>
+   <TabItem label="MCP">
+   Call the `release_update` tool with a `chatCTA` object:
+
+   ```json
+   {
+     "releaseId": "<releaseId>",
+     "chatCTA": {
+       "title": "Interested in real estate investing?",
+       "teaserText": "Download our free guide.",
+       "triggerKeywords": ["real estate investing", "1031"],
+       "ctaType": "link-out",
+       "targetUrl": "https://lp.example.com/playbook",
+       "active": true
+     }
+   }
+   ```
+
+   Any MCP-connected assistant (Claude, Cursor, …) can configure a CTA this way.
+   </TabItem>
+   <TabItem label="Admin UI">
+   **Workspace → Setup → Chat CTA** to author the card, then attach it on the
+   Release page under the **Chat CTA** section.
+   </TabItem>
+   </Tabs>
+
+2. **Verify it's attached.** The Release should now carry a `chatCTA` reference:
+
+   ```bash
+   divinci release get <releaseId>
+   ```
+
+3. **Ask a question that earns it.** Send a message whose answer will contain
+   one of your trigger keywords, and the card renders beneath the reply.
+
+</Steps>
+
+## Email-gated downloads
+
+Switch `ctaType` and add the gated asset plus the form config:
+
+```json
+{
+  "title": "Get the 2026 market report",
+  "teaserText": "12 pages of comps, yields and forecasts.",
+  "ctaType": "email-gated-download",
+  "assetUrl": "https://files.example.com/market-report-2026.pdf",
+  "formFields": ["email", "name"],
+  "consentText": "I agree to receive occasional updates.",
+  "requireCaptcha": true,
+  "successMessage": "Thanks! Your download is ready.",
+  "triggerKeywords": ["market report", "comps", "forecast"],
+  "active": true
+}
+```
+
+Captured leads are stored per CTA and pushed to the Release's configured CRM
+(HubSpot / Attio). Narrow the sync to one provider with `crmDestination`, and
+optionally double-write into **your own** Constant Contact list with
+`constantContactListId` + `constantContactAccessToken`.
+
+<Aside type="caution" title="The Constant Contact token is write-only">
+`constantContactAccessToken` is stored `select: false` and is never echoed back
+by any read endpoint, never included in a CTA's version history, and never sent
+to a client. On update, omit the field to keep the stored value, or send `""`
+to clear it — the same convention as a password input.
+</Aside>
+
+`requireCaptcha` puts a Cloudflare Turnstile challenge on the submit, reusing
+the Free-Chat Gate's Turnstile infrastructure.
+
+## Versioning
+
+Chat CTAs are versioned like the other whitelabel resources (chat disclaimer,
+thread prefix, terms of service). Every update that changes the card's content
+archives the previous revision to `versionHistory` and advances `version`, so
+you can see what a CTA used to say and restore it from the admin UI.
+
+Rotating only the Constant Contact credential is deliberately **not** a content
+revision — it doesn't cut a new version, and the token never enters history.
+
+## Good to know
+
+- **One CTA per Release.** The Release holds a single `chatCTA` reference; swap
+  the reference to change the offer.
+- **`active` is the kill switch.** An inactive CTA never fires even while the
+  Release still references it — the fastest way to pull an offer without
+  editing the Release.
+- **Saving a Release preserves the CTA.** The admin Release form round-trips the
+  `chatCTA` reference, so an unrelated edit won't detach your card.
+- **Links carry `ref=divinci`** so you can attribute the traffic in your own
+  analytics.
+
+## Related
+
+- [Releases](/server/releases/) — the Release object that owns the CTA reference
+- [Embed Client](/embed/overview/) — the widget CTAs render in
+- [Type Reference](/reference/types/) — the full `ChatCTAInput` shape

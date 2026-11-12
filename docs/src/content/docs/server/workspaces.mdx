@@ -1,0 +1,69 @@
+---
+title: Workspaces
+description: Create and manage workspaces (white-labels) and read their usage.
+---
+
+A **workspace** (also called a white-label) is the top-level container for your
+Releases, knowledge bases, API keys, and users. Manage them through
+`divinci.workspaces`.
+
+## Listing workspaces
+
+```typescript
+const { data, hasMore, total } = await divinci.workspaces.list({ limit: 20 });
+```
+
+## Creating a workspace
+
+```typescript
+const workspace = await divinci.workspaces.create({
+  name: "My AI Assistant",
+});
+
+console.log(workspace._id);
+```
+
+## Reading, updating, deleting
+
+```typescript
+const ws = await divinci.workspaces.get(workspace._id);
+
+await divinci.workspaces.update(workspace._id, { name: "Renamed Assistant" });
+
+await divinci.workspaces.delete(workspace._id);
+```
+
+## Usage analytics
+
+Read aggregated usage for a window of `"day"`, `"week"`, or `"month"`:
+
+```typescript
+const usage = await divinci.workspaces.getUsage(workspace._id, "month");
+
+console.log(usage.totalApiCalls);
+console.log(usage.totalTokens);
+console.log(usage.uniqueUsers);
+console.log(usage.activeChats);
+console.log(usage.storageUsedBytes);
+```
+
+## Method reference
+
+| Method | Description |
+|--------|-------------|
+| `list(options?)` | Paginated list of workspaces. |
+| `get(workspaceId)` | Fetch a single workspace. |
+| `create(options)` | Create a workspace. |
+| `update(workspaceId, options)` | Update workspace fields. |
+| `delete(workspaceId)` | Delete a workspace. |
+| `getUsage(workspaceId, period?)` | Usage stats for `"day" \| "week" \| "month"`. |
+
+## Workspace-scoped configuration
+
+Title and description live on a separate config client:
+
+```typescript
+const config = await divinci.config.get(workspace._id);
+await divinci.config.updateTitle(workspace._id, "Support Bot");
+await divinci.config.updateDescription(workspace._id, "Answers product questions.");
+```

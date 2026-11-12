@@ -1,0 +1,71 @@
+---
+/**
+ * Renders the vendor table for one tool type, from the generated catalog
+ * (src/data/tool-catalog.json) joined with the weekly usage snapshot
+ * (src/data/tool-usage.json).
+ *
+ * Both files are generated — see scripts/sdk-docs/ in the server repo. Nothing
+ * here is hand-maintained, so a tool added or deprecated in code cannot leave
+ * the docs asserting something that stopped being true.
+ */
+import catalog from "../data/tool-catalog.json";
+import usage from "../data/tool-usage.json";
+
+interface Props {
+  /** e.g. "RAG/Vector" — must match ToolTypes in the platform. */
+  type: string;
+  /** Show the deprecated rows too (default: hide them). */
+  includeDeprecated?: boolean;
+}
+
+const { type, includeDeprecated = false } = Astro.props;
+
+const tools = (catalog.tools as Array<Record<string, string>>)
+  .filter((t) => t.toolType === type)
+  .filter((t) => includeDeprecated || t.status !== "deprecated");
+
+const categories = (usage as { categories: Record<string, { unit: string; total: number; counts: Record<string, number> }> }).categories ?? {};
+const usageForType = categories[type];
+const generatedAt = (usage as { generatedAt: string | null }).generatedAt;
+
+function usageCell(id: string): string {
+  if (!usageForType) return "—";
+  const count = usageForType.counts[id];
+  if (!count) return "0";
+  const share = usageForType.total > 0 ? Math.round((count / usageForType.total) * 100) : null;
+  return share === null ? String(count) : `${count} (${share}%)`;
+}
+---
+
+<div style="overflow-x: auto;">
+  <table>
+    <thead>
+      <tr>
+        <th>Tool id</th>
+        <th>Vendor</th>
+        <th>Credentials</th>
+        <th>Status</th>
+        <th>Divinci usage</th>
+      </tr>
+    </thead>
+    <tbody>
+      {tools.map((tool) => (
+        <tr>
+          <td><code>{tool.id}</code>{tool.description ? <><br /><small>{tool.description}</small></> : null}</td>
+          <td>{tool.url ? <a href={tool.url} rel="nofollow noopener">{tool.org ?? tool.title}</a> : (tool.org ?? "—")}</td>
+          <td>{tool.credentials === "divinci-managed" ? "Divinci-managed" : "BYOK"}</td>
+          <td>{tool.status === "deprecated" ? "⚠️ deprecated" : "available"}</td>
+          <td>{usageCell(tool.id)}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>
+
+<p>
+  <small>
+    {usageForType && generatedAt
+      ? <>Usage: {usageForType.total.toLocaleString()} {usageForType.unit} in production, counted {new Date(generatedAt).toISOString().slice(0, 10)}. Refreshed weekly.</>
+      : <>Usage figures for this category are not collected yet — the weekly job populates them.</>}
+  </small>
+</p>

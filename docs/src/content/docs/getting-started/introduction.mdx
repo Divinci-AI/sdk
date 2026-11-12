@@ -1,0 +1,73 @@
+---
+title: Introduction
+description: What the Divinci AI SDK is, how the packages fit together, and which one to use.
+---
+
+import { Card, CardGrid, Aside, LinkCard } from "@astrojs/starlight/components";
+
+The Divinci AI SDK is a family of TypeScript packages for building on the Divinci
+platform — chat, retrieval-augmented generation (RAG), fine-tuning, evaluation,
+and pay-per-call tools. Every package shares one type system (`@divinci-ai/types`)
+and the same authentication model, so what you learn in one carries over to the rest.
+
+## The platform in one paragraph
+
+You configure an AI assistant once as a **Release** — its model, prompt, RAG
+knowledge base, theme, and access rules. A Release lives inside a **Workspace**
+(also called a white‑label). Your **end users** chat against a Release; your
+**backend** manages Workspaces, Releases, and knowledge bases. The SDK packages
+split cleanly along that line: client-side packages talk to a Release, the server
+package administers the platform.
+
+## Which package do I need?
+
+<CardGrid>
+  <Card title="@divinci-ai/client" icon="laptop">
+    A headless, browser‑safe TypeScript SDK. You own the UI; the client owns
+    chat threads, streaming, realtime WebSockets, and per‑user RAG. Reach for
+    this when building a custom chat experience in React, Vue, Svelte, or
+    vanilla JS.
+  </Card>
+  <Card title="Embed script" icon="rocket">
+    A zero‑build `<script>` tag that mounts a fully‑rendered Divinci chat widget
+    on any page. No bundler, no npm. Reach for this when you want chat live in
+    minutes and don't need to control the UI.
+  </Card>
+  <Card title="@divinci-ai/server" icon="node">
+    A Node.js SDK with full platform access — Workspaces, Releases, RAG ingestion,
+    API keys, fine‑tuning, QA suites, and x402 payments. Holds your secret API key,
+    so it runs only on a trusted backend.
+  </Card>
+  <Card title="@divinci-ai/mcp" icon="puzzle">
+    A Model Context Protocol client. Connects MCP‑compatible assistants (Claude
+    Desktop, Cursor, your own agent) to Divinci tools and resources, with optional
+    x402 pay‑per‑call.
+  </Card>
+</CardGrid>
+
+<Aside type="tip" title="Rule of thumb">
+  If the code runs in a **browser**, use `@divinci-ai/client` (or the embed
+  script). If it runs on a **server** with a secret API key, use
+  `@divinci-ai/server`. If it bridges an **AI assistant** to Divinci tools, use
+  `@divinci-ai/mcp`.
+</Aside>
+
+## How they fit together
+
+A typical production app uses two packages at once:
+
+- Your **backend** uses `@divinci-ai/server` to create a Release, upload RAG
+  documents, and mint short‑lived user tokens.
+- Your **frontend** uses `@divinci-ai/client` with that token to run the chat,
+  streaming responses directly to the browser.
+
+The `@divinci-ai/types` package is the shared vocabulary — `ChatMessage`,
+`Release`, `RagDocument`, and friends. It ships as a dependency of the other
+packages, so you rarely install it directly, but you can import its types for
+your own function signatures.
+
+## Next steps
+
+<LinkCard title="Installation" href="/getting-started/installation" description="Install the package you need with npm, pnpm, or yarn." />
+<LinkCard title="Quick Start" href="/getting-started/quickstart" description="Send your first message and run your first server operation." />
+<LinkCard title="Authentication" href="/getting-started/authentication" description="API keys, user tokens, and external users — and where each belongs." />

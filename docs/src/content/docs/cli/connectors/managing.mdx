@@ -1,0 +1,77 @@
+---
+title: Managing connections
+description: The provider-agnostic connector commands — list, status, settings, sync, sync-status, sync-cancel, disconnect, stats.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+These commands work for every provider, however it was connected.
+
+## List and inspect
+
+```bash
+divinci connectors list                          # every connection in the workspace
+divinci connectors status wordpress              # one provider
+divinci connectors stats                         # counts across all connectors
+```
+
+`list` shows each connection's provider, status, recurrence, last sync and
+source URL. `status` adds the tracked file count and the connection id you need
+for the sync commands.
+
+## Run and track a sync
+
+```bash
+divinci connectors sync <connectionId>          # run one now
+divinci connectors sync-status <connectionId>   # last 10 jobs, with item counts and errors
+divinci connectors sync-cancel <connectionId>   # stop everything pending or running
+```
+
+<Aside type="caution" title="`sync` covers two providers">
+`web_crawl` and `wordpress` re-run from settings the connector already holds, so
+they can be triggered headlessly. Every other provider's pipeline needs an
+explicit file selection and an interactive user token — the API rejects those
+with a `400` that names the supported providers, rather than queueing a job it
+could not fulfil. Sync them from the Connectors page in the web app.
+</Aside>
+
+If a sync job is already running you get a `409` with its job id.
+Jobs that have been active for more than a couple of minutes with nothing behind
+them are auto-cancelled so a crashed run cannot wedge the connection forever.
+
+## Change a schedule
+
+```bash
+divinci connectors settings wordpress                       # show
+divinci connectors settings wordpress --auto-sync on --cadence 1440
+divinci connectors settings wordpress --auto-sync off
+```
+
+Cadence is in minutes with a **15-minute floor**.
+
+## Disconnect
+
+```bash
+divinci connectors disconnect wordpress
+```
+
+For OAuth providers this also revokes the token at the provider, on a
+best-effort basis — a failure there still marks the connection revoked here.
+
+## Every command takes `--workspace`
+
+All of them default to your active workspace and accept `--workspace <id>` to
+target another.
+
+## The same surface elsewhere
+
+| Surface | How |
+| --- | --- |
+| **REST** | `/api/v1/connectors/*`, with an API key carrying `connector:read` / `connector:write` |
+| **MCP** | `connector_list`, `connector_status`, `connector_sync`, `connector_sync_status`, `connector_sync_cancel`, `connector_disconnect`, `connector_stats` |
+| **Web app** | Workspace → Setup → Connectors |
+
+## See also
+
+- [Connectors overview](/cli/connectors/)
+- [MCP tool catalog](/mcp/tool-catalog/#groups--access)

@@ -1,0 +1,10 @@
+# Security headers for sdk.divinci.ai (Cloudflare Workers Static Assets
+# honors _headers files in the assets directory).
+# Docs site is fully static: no inline-event handlers, no third-party scripts.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains

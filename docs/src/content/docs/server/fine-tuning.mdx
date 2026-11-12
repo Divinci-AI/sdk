@@ -1,0 +1,103 @@
+---
+title: Fine-tuning & Training Data
+description: Generate synthetic training data from your content and run fine-tuning jobs.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Two cooperating clients turn your existing content into a fine-tuned model:
+
+- **`divinci.trainingData`** synthesizes question/answer pairs from RAG documents
+  or audio transcripts.
+- **`divinci.fineTune`** manages the fine-tuning jobs and their files.
+
+## Generating training data
+
+Estimate cost first, then generate:
+
+```typescript
+const estimate = await divinci.trainingData.estimateCost(
+  "ws_123",
+  "RagFile",
+  ragFileId,
+  { qaPerChunk: 3 },
+);
+console.log(estimate.costs.totalCostUSD);
+
+const job = await divinci.trainingData.generateFromRag("ws_123", ragFileId, {
+  qaPerChunk: 3,
+  qualityThreshold: 0.7,
+});
+
+// Wait for the async job to finish
+const done = await divinci.trainingData.waitFor("ws_123", job._id, {
+  onProgress: (j) => console.log(j.progress?.qaPairsGenerated),
+});
+
+const pairs = await divinci.trainingData.results("ws_123", job._id);
+```
+
+You can also generate from audio: `generateFromAudio("ws_123", audioId, options)`.
+
+### Exporting generated data
+
+The same training-data job can flow into fine-tuning, QA suites, or back into RAG:
+
+```typescript
+// → fine-tune file
+await divinci.trainingData.exportToFineTune("ws_123", job._id, { approvedOnly: true });
+
+// → QA test suites
+await divinci.trainingData.exportToQA("ws_123", job._id, {
+  targetSuiteIds: ["suite_a"],
+  samplingStrategy: "diverse",
+  maxTests: 50,
+});
+
+// → a RAG vector (synthesize declarative passages)
+await divinci.trainingData.exportToRag("ws_123", job._id, {
+  synthesisMode: "auto",
+  enableRoundTripFilter: true,
+});
+```
+
+## Fine-tuning jobs
+
+```typescript
+const job = await divinci.fineTune.create({
+  workspaceId: "ws_123",
+  name: "support-tuned-v1",
+  baseModel: "gemini-2.5-flash",
+  trainingData: fineTuneFile,
+});
+
+await divinci.fineTune.start(job._id);
+
+const status = await divinci.fineTune.status(job._id);
+console.log(status.status, status.progress);
+
+await divinci.fineTune.cancel(job._id);
+```
+
+### Reusing files across workspaces
+
+```typescript
+const result = await divinci.fineTune.copyFilesFrom({
+  sourceWhitelabelId: "ws_source",
+  // optional: sourceFileIds, copyCachedIds
+});
+console.log(result.fileIdMap);
+```
+
+## Method reference
+
+| Client | Methods |
+|--------|---------|
+| `trainingData` | `estimateCost`, `generateFromRag`, `generateFromAudio`, `list`, `get`, `results`, `exportToFineTune`, `exportToQA`, `exportToRag`, `cancel`, `waitFor` |
+| `fineTune` | `list`, `get`, `create`, `delete`, `start`, `status`, `cancel`, `copyFilesFrom`, `exportFileToQA` |
+
+<Aside type="tip">
+  Generated Q&A pairs carry a `qualityScore` and `approved` flag. Use
+  `approvedOnly: true` on exports, or filter on `qualityThreshold`, to keep only
+  high-quality pairs in your training set.
+</Aside>

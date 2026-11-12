@@ -1,0 +1,109 @@
+---
+title: Extension Bridge
+description: The @divinci-ai/extension-bridge package — run AI chat on the user's device via the Divinci Local Inference browser extension, with automatic cloud fallback.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`@divinci-ai/extension-bridge` lets any website talk to the **Divinci Local
+Inference** browser extension, so chat runs **on the user's device** — private,
+free, and with no server round-trip — and falls back to the Divinci cloud API
+when the extension isn't installed.
+
+It has **zero Divinci-internal dependencies** and works in any browser. Unlike
+the other packages here, it is designed to be dropped into a site that has
+nothing else of ours in it.
+
+```bash
+npm install @divinci-ai/extension-bridge
+```
+
+## Quick start
+
+```typescript
+import { createDivinciBridge } from "@divinci-ai/extension-bridge";
+
+// cloudChat is your existing cloud path — wire it to @divinci-ai/client.
+// Omit it to require the extension.
+const divinci = createDivinciBridge({ cloudChat });
+
+const { fullText, source } = await divinci.chat(
+  { messages: [{ role: "user", content: "Summarize this page." }] },
+  { onToken: (delta) => append(delta) },
+);
+
+console.log(source); // "extension" (on-device) or "cloud"
+```
+
+`source` tells you which path served the turn, so you can badge on-device
+responses differently, or track how often the extension is doing the work.
+
+## Consent
+
+The first time a site calls `chat()` through the extension, the user sees a
+one-time in-page prompt — *"Allow example.com to run AI chat on your device?"*.
+
+<Aside type="note">
+Grants are **per-origin** and revocable at any time from the extension popup.
+Your site cannot suppress the prompt or grant on the user's behalf; it can only
+ask earlier (see `requestAccess()` below).
+</Aside>
+
+## Detecting the extension
+
+```typescript
+const { present, extensionVersion, supportedModels } = await divinci.detect();
+if (present) showOnDeviceBadge();
+```
+
+`hasExtension()` is a synchronous presence check when you only need a boolean
+and can't await.
+
+## Advanced surfaces
+
+These reach the extension directly and have no cloud equivalent:
+
+```typescript
+await divinci.requestAccess(["chat"]);   // pre-warm the consent prompt
+const card = await divinci.agentCard();  // the local agent's A2A Agent Card
+const task = await divinci.task("...");  // submit an A2A task to the local agent
+```
+
+Behaviour without an extension is deliberately asymmetric, so a missing
+extension never looks like a silent success:
+
+| Call | No extension present |
+|------|----------------------|
+| `chat()` | falls back to `cloudChat`, or **rejects** if you didn't supply one |
+| `detect()` | resolves with `present: false` |
+| `hasExtension()` | returns `false` |
+| `requestAccess()` | returns `[]` |
+| `agentCard()` / `task()` | **reject** |
+
+## Consent scopes
+
+`ConsentScope` is `"chat" | "webmcp" | "a2a"`. Request only what you use —
+a site asking for all three gets a broader prompt and is likelier to be denied.
+
+## How it works
+
+The extension injects `window.divinci` from a MAIN-world content script. This
+package is a thin, dependency-injected dispatcher over it: extension-first,
+cloud-fallback.
+
+All dispatch logic is **pure** — both `window` and `cloudChat` are options — so
+it is fully testable without a browser, and you can unit-test your integration
+by passing a fake.
+
+```typescript
+const divinci = createDivinciBridge({
+  win: fakeWindow,           // inject a stub instead of the real window
+  cloudChat: fakeCloudChat,
+});
+```
+
+<Aside type="caution">
+On-device inference depends on the user's hardware. Treat the extension as an
+optimisation, not a guarantee: always supply `cloudChat` unless your product can
+genuinely refuse to work without the extension.
+</Aside>

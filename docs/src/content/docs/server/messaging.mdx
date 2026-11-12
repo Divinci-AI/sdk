@@ -1,0 +1,176 @@
+---
+title: "Messaging & Presentation"
+description: "What the assistant is told, what the user sees before they type, and how replies are presented — prefixes, starters, welcome copy, disclaimers, terms of service, response types, and theme."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+This group shapes the conversation around the model: the standing instructions
+it carries, the copy a visitor meets before typing, and how replies are
+rendered.
+
+| Setting | Field | In the SDK? |
+| --- | --- | --- |
+| [Thread prefix](#prefixes) | `threadPrefix` | ✅ (as a string) |
+| [Message prefix](#prefixes) | `msgPrefix` | ✅ (as a string) |
+| [Conversation starters](#conversation-starters) | `conversationStarter` | ✅ `conversationStarters` |
+| [Welcome message](#welcome-message) | `chatWelcomeMessage` (+ overrides) | ✅ |
+| [Chat CTA](/guides/chat-cta/) | `chatCTA` | ✅ |
+| [Disclaimer](#disclaimer) | `chatDisclaimer` | ✅ |
+| [Terms of service](#terms-of-service) | `termsOfService` | ✅ |
+| [Response types](#response-types) | `responseTypeConfigOverride` | ✅ |
+| [Theme](#theme) | `themeOverride`, `pictureOverride` | `themeOverride` ✅ |
+
+<Aside type="tip" title="The SDK creates these sub-documents for you">
+Most of these are stored on the Release as `{ id }` references to
+sub-documents, not raw strings. The SDK hides that: pass a plain string (or an
+array of starters) and it creates the sub-document and references it in one
+call.
+
+Better still, when the Release already references one it **PATCHes that document
+in place**, which auto-archives the prior value into `versionHistory` and bumps
+its version. Editing through the SDK therefore preserves history, exactly as the
+admin UI does, instead of orphaning a fresh history-less document on every call.
+</Aside>
+
+## Prefixes
+
+Both inject standing instructions; they differ in *when*.
+
+**Thread prefix** is injected **once**, at the very start of a conversation.
+Persona, tone, ground rules for the whole thread:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  threadPrefix:
+    "You are Aurora, the shopping assistant for Aurora Outfitters. " +
+    "Friendly, knowledgeable, and always mention free returns when relevant.",
+});
+```
+
+**Message prefix** (`msgPrefix`) re-injects before **every** message. Use it for
+a rule that must survive many turns — a formatting constraint, an output shape —
+where a single instruction at thread start would drift out of the model's
+attention.
+
+The trade is cost: a message prefix is re-sent every turn and pays its tokens
+every turn. Put durable personality in the thread prefix and reserve the message
+prefix for rules that genuinely decay.
+
+## Conversation starters
+
+The clickable prompts on an empty chat — a handful of short options, each capped
+at **200 characters**.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  conversationStarters: [
+    "What's your return policy?",
+    "Help me find a winter jacket",
+  ],
+});
+```
+
+## Welcome message
+
+The first thing a visitor sees when they open chat. Welcome messages are managed
+**globally** for the workspace; the Release form overrides each message's
+*active* status for this Release only.
+
+That is what makes A/B testing welcome copy cheap: write both messages once at
+workspace level, then activate a different one per Release via
+`chatWelcomeMessageOverrides` — no duplication, and the copy stays in one place.
+
+## Disclaimer
+
+Shown before a visitor can start chatting. The admin UI offers a **rewrite with
+Divinci** shortcut — write it roughly, and the assistant cleans up the wording.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  chatDisclaimer: "Responses are AI-generated and may be inaccurate.",
+});
+```
+
+A disclaimer is presentation, not consent — it informs, and nothing records that
+the visitor read it. When you need a recorded, versioned agreement, use Terms of
+Service.
+
+## Terms of service
+
+The one section with its own **nested publish cycle**, and the only one that can
+force existing users to act.
+
+| Field | Meaning |
+| --- | --- |
+| `draftContent` | Working copy. Editing it never changes what users see |
+| `publishedContent` | What users actually accept. Set **only** by an explicit publish |
+| `publishedVersion` | `0` = never published |
+| `versionHistory` | Prior published versions |
+
+Acceptance is recorded per identity — an Auth0 `userId` **or** an anonymous
+session id, with timestamp, IP, and user agent — so anonymous visitors are gated
+and recorded too.
+
+<Aside type="caution" title="Publishing forces re-acceptance everywhere the document is used">
+A publish bumps `publishedVersion`, and acceptance is keyed to the version — so
+**every user of every Release referencing that document** must re-accept before
+their next message. That is the intended behaviour for a terms change, but it is
+a blast radius worth knowing before clicking publish on a typo fix. Draft edits
+are private and unlimited; only publishing is disruptive.
+
+The mirror image: while `publishedVersion` is `0`, a Release's reference is
+**inert** — the gate does not engage and nobody is asked anything. A configured
+but unpublished ToS gates nothing.
+</Aside>
+
+## Response types
+
+Controls whether replies may include generated diagrams or images.
+
+| `preset` | Allows |
+| --- | --- |
+| `text-only` | Text |
+| `text+diagrams` | Text, mermaid diagrams |
+| `text+images` | Text, generated images |
+| `text+diagrams+images` | Everything |
+| `custom` | Exactly `allowedTypes` |
+
+`enforcement` decides how hard the rule is: `advisory` adds prompt guidance and
+hopes, while `strict` **strips** disallowed content from the response after
+generation. Advisory is cheaper and occasionally leaks; strict costs the
+generated tokens anyway but guarantees the output shape.
+
+Leave the override unset to inherit the platform default.
+
+## Theme
+
+`themeOverride` sets this Release's appearance, taking priority over the
+workspace theme; `null` clears it and re-inherits. `pictureOverride` does the
+same for the avatar or logo.
+
+The admin UI's **derive from storefront** points at your site and pulls brand
+colours straight off the page, runs a legibility check, and drops a ready-to-use
+theme into the draft — reachable directly at
+`POST /white-label/{workspaceId}/release/{releaseId}/derive-theme`.
+
+## Gotchas
+
+- **`msgPrefix` costs tokens every turn.** Unlike `threadPrefix`, its price
+  scales with conversation length — that, not availability, is the reason to
+  prefer a thread prefix where either would do.
+- **A Chat CTA attached here still needs to be active on its own page.**
+  Attaching references the CTA; the CTA's own `active` flag is what fires it. See
+  [Chat CTAs](/guides/chat-cta/).
+- **An unpublished ToS gates nothing**, and a published one gates *everyone* on
+  every Release using it. There is no middle setting.
+- **Welcome messages are global; only their active status is per Release.**
+  Editing the copy changes it everywhere it is active.
+- **`advisory` enforcement is a request, not a guarantee.** If a response type
+  must never appear, use `strict`.
+
+## Related
+
+- [Chat CTAs](/guides/chat-cta/) — the inline call-to-action card
+- [Releases](/server/releases/) — the object these settings live on
+- [Channels & Access](/server/channels-access/) — who reaches the Release at all

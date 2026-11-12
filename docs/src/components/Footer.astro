@@ -1,0 +1,16 @@
+---
+/**
+ * Footer override: renders Starlight's default footer, then mounts the
+ * DocsAssistant chat widget. Footer is rendered on every docs page, so this
+ * is how the assistant appears site-wide without touching every route.
+ */
+import Default from "@astrojs/starlight/components/Footer.astro";
+import DocsAssistant from "./DocsAssistant.astro";
+import FractalBackground from "./FractalBackground.astro";
+import Analytics from "./Analytics.astro";
+---
+
+<FractalBackground />
+<Default><slot /></Default>
+<DocsAssistant />
+<Analytics />

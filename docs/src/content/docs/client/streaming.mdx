@@ -1,0 +1,133 @@
+---
+title: Streaming
+description: Stream assistant responses token-by-token with callbacks.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+`client.chat.stream()` sends a message and delivers the response incrementally
+over Server-Sent Events. It is **callback-driven** and resolves with the final
+assembled `ChatMessage`.
+
+```typescript
+const finalMessage = await client.chat.stream(thread.id, "Tell me a story", {
+  assistantName: "your-assistant-id", // required — the release's assistant/model id
+  onChunk: (text) => process.stdout.write(text),
+  onComplete: (message) => console.log("\n\ndone:", message.id),
+  onError: (error) => console.error(error),
+});
+```
+
+<Aside type="note" title="Chunk granularity varies">
+  Depending on the release's rewrite/moderation policy, the answer may arrive
+  as many small chunks or buffered into few (even one). Don't build UI logic
+  that assumes a minimum chunk count — render whatever `onChunk` delivers and
+  finalize on `onComplete`.
+</Aside>
+
+<Aside type="caution">
+  `stream()` does **not** return an async iterator. You receive deltas through
+  `onChunk` / `onEvent` callbacks, and the returned promise resolves once with the
+  complete message. (`for await … of stream()` will not work.)
+</Aside>
+
+## Signature
+
+```typescript
+stream(
+  chatId: string,
+  content: string,
+  options?: SendMessageOptions & StreamOptions,
+): Promise<ChatMessage>
+```
+
+`options` accepts everything [`send()`](/client/chat) accepts (`assistantName`,
+`attachments`, `metadata`, `replyTo`, …) plus the streaming callbacks below.
+
+## Stream callbacks
+
+| Callback | Fires when |
+|----------|-----------|
+| `onChunk(text)` | A content delta arrives. The simplest way to render tokens. |
+| `onComplete(message)` | The full message is assembled. |
+| `onError(error)` | The stream fails (a typed `DivinciError`). |
+| `onArenaVariant(variant)` | An arena variant arrives (arena mode). |
+| `onArenaComplete(variants)` | All arena variants have arrived. |
+| `onEvent(event)` | Low-level access to every event (see below). |
+
+## Fine-grained events with `onEvent`
+
+For richer UIs (showing RAG sources, render-then-finalize, arena skeletons), use
+`onEvent`, which receives a discriminated union:
+
+```typescript
+await client.chat.stream(thread.id, "What's covered under warranty?", {
+  assistantName: "your-assistant-id",
+  onEvent: (event) => {
+    switch (event.type) {
+      case "start":
+        beginBubble(event.messageId);
+        break;
+      case "chunk":
+        appendText(event.content);
+        break;
+      case "context":
+        renderSources(event.context); // RAG citations
+        break;
+      case "done":
+        finalize(event.message, event.usage);
+        break;
+      case "error":
+        showError(event.error);
+        break;
+      case "arena-variant":
+        renderVariant(event.variantIndex, event.variant);
+        break;
+      case "arena-complete":
+        enableVariantPicker(event.variants);
+        break;
+    }
+  },
+});
+```
+
+## Cancelling a stream
+
+Pass an `AbortSignal` to stop generation (e.g. a "Stop" button):
+
+```typescript
+const controller = new AbortController();
+
+const promise = client.chat.stream(thread.id, "Write a long essay", {
+  assistantName: "your-assistant-id",
+  onChunk: render,
+  signal: controller.signal,
+});
+
+stopButton.onclick = () => controller.abort();
+```
+
+Aborting rejects the promise; catch it and treat it as a user cancellation rather
+than an error.
+
+## React pattern
+
+```tsx
+function useStreamingSend(client: DivinciClient, threadId: string) {
+  const [text, setText] = useState("");
+  const controller = useRef<AbortController>();
+
+  const send = useCallback(async (prompt: string) => {
+    setText("");
+    controller.current = new AbortController();
+    await client.chat.stream(threadId, prompt, {
+      assistantName: "your-assistant-id",
+      onChunk: (delta) => setText((prev) => prev + delta),
+      signal: controller.current.signal,
+    });
+  }, [client, threadId]);
+
+  const stop = () => controller.current?.abort();
+  return { text, send, stop };
+}
+```

@@ -1,0 +1,66 @@
+---
+title: When your host blocks the embed script
+description: What to do if your website builder won't let you add a <script> tag — rebuild the site somewhere you control, then embed normally.
+---
+
+import { Aside, Steps } from "@astrojs/starlight/components";
+
+Adding Divinci to a site is one `<script>` tag. Some hosted website builders
+won't let you add one — the option is behind a higher plan, restricted to
+certain page types, or absent entirely.
+
+If you can add a script tag, you don't need this page. Use the
+[Cloudflare Workers guide](/guides/cloudflare-workers/) or drop the snippet
+straight into your template:
+
+```html
+<script src="https://embed.divinci.app/embed-script.js"
+        divinci-release-id="YOUR_RELEASE_ID"></script>
+```
+
+## If you can't
+
+The practical fix is to move the site somewhere you control. You do not need a
+special tool for this, and Divinci does not provide one — a general-purpose AI
+coding assistant does this well, and you keep the source.
+
+<Steps>
+
+1. **Rebuild the site with an AI assistant.** Point Claude, ChatGPT, Cursor or
+   similar at your live URL and ask it to reproduce the pages as static HTML.
+   Ask it to read the live DOM rather than work from a screenshot: a screenshot
+   cannot recover link targets, `alt` text, or the difference between a
+   slideshow and a stack of images, and those omissions are easy to miss.
+
+2. **Check what came across.** Compare page by page against the original —
+   copy, images, forms, embedded video, and every internal link. Things that
+   commonly go missing: pages absent from `sitemap.xml`, previous/next
+   navigation on detail pages, and background video.
+
+3. **Host it.** Static files on Cloudflare Workers, Netlify, Vercel, GitHub
+   Pages or any static host. See
+   [Deploy to Cloudflare Workers](/guides/cloudflare-workers/).
+
+4. **Add the embed.** Paste the script tag into every page. You control the
+   HTML now, so nothing is in the way.
+
+</Steps>
+
+<Aside type="caution" title="Only rebuild sites you own">
+Reproduce a site you own or are authorised to reproduce. Copy belongs to
+whoever wrote it, images are usually licensed to a specific site, and webfonts
+are frequently licensed per domain — a licence that covered the original host
+may not cover the new one.
+</Aside>
+
+## Anonymous visitors
+
+Once the embed is in place, set how many messages a visitor gets before signing
+in. That lives on the release (`maxAnonymousChatMessages`) and is enforced
+server-side, so it holds regardless of what the page does.
+
+<Aside type="note">
+Divinci previously offered a hosted Site Converter that did the rebuild for
+you. It has been retired: a general-purpose coding assistant produces a better
+result, and you own the output rather than depending on us to regenerate it.
+</Aside>

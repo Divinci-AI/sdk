@@ -1,0 +1,34 @@
+---
+title: Phone Usage
+description: Check unbilled voice-call and SMS/MMS usage from the terminal — divinci phone usage voice/sms.
+---
+
+Read the workspace's current **unbilled** [phone billing](/guides/voice-phone/#usage--billing)
+usage — voice-call minutes (LiveKit) and SMS/MMS segments (Twilio), both at
+cost. Every command supports the global `--json` flag for scripting and
+`--workspace <id>` to override the active workspace.
+
+## Voice-call usage
+
+```bash
+divinci phone usage voice
+
+divinci phone usage voice --workspace ws_123
+```
+
+Returns `callsUnbilled`, `totalNanoUSDUnbilled`, and `oldestCallStartedAt` —
+the epoch-ms timestamp of the oldest call the next billing sweep will charge.
+
+## SMS/MMS usage
+
+```bash
+divinci phone usage sms
+```
+
+Returns `messagesUnbilled` and `totalNanoUSDUnbilled` — inbound and outbound
+messages both count, each at the applicable SMS or MMS per-segment rate.
+
+## See also
+
+- [Voice, Phone & SMS](/guides/voice-phone/) — the full feature + billing model (rates, rounding, attribution).
+- [MCP tool catalog](/mcp/tool-catalog/#phone-billing) — `phone_usage_voice` / `phone_usage_sms` for agentic IDEs.

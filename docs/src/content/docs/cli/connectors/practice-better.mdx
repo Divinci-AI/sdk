@@ -1,0 +1,92 @@
+---
+title: Practice Better
+description: Sync a health practice's session notes, protocols and intake forms into a RAG vector — de-identified before indexing.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Syncs a [Practice Better](https://api-docs.practicebetter.io/) account so
+clinicians can ask questions across their own caseload.
+
+**Shape:** credential (OAuth2 *client credentials* — no consent screen, so it
+behaves like a key, not like a redirect). **Provider id:** `practice_better`.
+
+<Aside type="danger" title="This connector ingests PHI">
+Every other connector ingests content the customer published. This one ingests
+their **patients'** medical records. Clinical text is de-identified before it
+leaves the adapter and that step **fails closed** — if de-identification cannot
+run, nothing is ingested. Treat the resulting vector as protected health
+information for every downstream decision: who can query the assistant, what is
+logged, how long the vector lives.
+</Aside>
+
+## Credentials
+
+| Field | Required | Notes |
+| --- | --- | --- |
+| `clientId` | ✅ | API client id (an identifier, not a secret) |
+| `clientSecret` | ✅ | Stored encrypted, never returned |
+
+An invalid secret and a missing API add-on on the Practice Better side produce
+**different** messages — the validation error is surfaced verbatim rather than
+flattened to "invalid credentials", because the fix differs.
+
+## Settings
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `targetVectorId` | — | The vector this connector ingests into (required) |
+| `resources` | `sessionNotes, protocols, formRequests` | Which record types to sync |
+| `teamFor` | `me` | `me` for your own caseload, `all` for the whole practice |
+| `consultantIds` | — | Limit to specific consultants |
+| `ownerFiltering` | off | Limit each practitioner to clients they authored notes for |
+| `excludeArchived` | on | Skip archived notes and protocols |
+| `dailyRequestBudget` | `2000` | Cap on API calls per day |
+| `autoSync` / `syncIntervalMinutes` | on / `1440` | Recurring sync |
+
+Available resources: `sessionNotes`, `protocols`, `formRequests`,
+`clientRecords`, `journalEntries`, `labRequests`, `medicalHistory`,
+`dietLifestyle`, `measurements`.
+
+<Aside type="caution" title="The daily budget is shared, and it is not ours">
+Practice Better allows **10,000 requests per day across every integration on the
+account** — not per integration. The default budget of 2,000 leaves headroom for
+whatever else the practice runs. Raise it only if you know what else is
+spending, or a wide sync can exhaust the practice's quota for the day.
+</Aside>
+
+## Connect
+
+```bash
+curl -X POST https://api.divinci.app/api/v1/connectors/practice_better/auth \
+  -H "Authorization: Bearer $DIVINCI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "credentials": { "clientId": "…", "clientSecret": "…" },
+        "providerSettings": {
+          "targetVectorId": "<vectorId>",
+          "resources": ["sessionNotes", "protocols"],
+          "teamFor": "me",
+          "autoSync": true,
+          "syncIntervalMinutes": 1440
+        }
+      }'
+```
+
+Credentials and settings go in **one call** deliberately: connecting first and
+configuring second leaves a half-configured connector behind whenever the second
+call never happens.
+
+## From the CLI
+
+```bash
+divinci connectors status practice_better
+divinci connectors settings practice_better --auto-sync on --cadence 1440
+divinci connectors sync-status <connectionId>
+divinci connectors disconnect practice_better
+```
+
+## See also
+
+- [De-Identification (PII)](/server/de-identification/)
+- [Managing connections](/cli/connectors/managing/)

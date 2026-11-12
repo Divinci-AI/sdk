@@ -1,0 +1,470 @@
+---
+title: QA Suites & Active Learning
+description: Deep-dive into Divinci's Scored QA, active-learning loop, human-anchored calibration, Auto-Fix/AutoRAG agent, and verifiable TrustRuns.
+---
+
+import YouTube from "../../../components/YouTube.astro";
+
+`divinci.qa` (Scored QA) is a production-grade evaluation, calibration, and optimization suite built for domain-specific knowledge bases and Retrieval-Augmented Generation (RAG) pipelines. Rather than relying on generic, uncalibrated LLM benchmarks, Scored QA bridges the gap between offline developer-led evaluation and online user feedback. It implements **active-learning loops**, **human-anchored judge calibration**, and **autonomous agent-driven optimization (Auto-Fix/AutoRAG)** to continually audit and heal LLM applications.
+
+Below is the comprehensive technical reference for the Scored QA ecosystem, explaining how every system works in detail, along with their architecture, APIs, mathematical models, and deployment configurations.
+
+<YouTube
+  id="_Fgxhij-Wkc"
+  title="Divinci AutoRAG — finding and closing knowledge gaps"
+  caption="AutoRAG in practice: generating a QA set from a corpus, finding where the knowledge base falls short, and closing those gaps."
+/>
+
+---
+
+## 1. Architectural Blueprint & Life Cycle
+
+The Scored QA system is designed around a self-improving feedback loop. It bridges offline calibration (verifying prompts, configurations, and models against a gold-standard benchmark) and online production (real user interactions in the RAG Arena).
+
+```
+ ┌────────────────────────────────────────────────────────┐
+ │                      RAG ARENA                         │
+ │  (Online User Interacting with Model & Custom RAG)     │
+ └───────────┬────────────────────────────────────────────┘
+             │                               ▲
+             │ [Promote Arena Impression]    │ [Graduate Route/Variant]
+             ▼ (#234 promoteFromArena)        │ (#237 graduateToArena)
+ ┌───────────────────────────────────────────┴────────────┐
+ │                     CALIBRATION                        │
+ │  (Human Expert Gold Ratings vs. Automated LLM Judges)  │
+ └───────────┬────────────────────────────────────────────┘
+             │                               ▲
+             │ [Select Highest ρ Judge]      │ [Auto-Apply Prompt Patches]
+             ▼                               │ (Iteration & Patching)
+ ┌───────────────────────────────────────────┴────────────┐
+ │                      EVALUATION                        │
+ │  (QA Suites, Scorer Weights, & Multi-Release Runs)     │
+ └───────────┬────────────────────────────────────────────┘
+             │                               ▲
+             │ [Calculate Escrow Budget]     │ [Tune parameters: k, chunk]
+             ▼                               │ (AutoRAG Agent Cycle)
+ ┌───────────────────────────────────────────┴────────────┐
+ │                 AUTONOMOUS AUTO-FIX                    │
+ │  (LLM Healing Agents Diagnostic Optimization Loops)   │
+ └────────────────────────────────────────────────────────┘
+```
+
+The cycle consists of four primary stages:
+1. **Promote from Arena:** Real-world user interactions and "winner picks" from live arena sessions are captured. High-disagreement cases (where human choice differs from automated scoring) are flagged via active learning and promoted into the QA Suite as a calibration corpus, preserving their original RAG routing provenance.
+2. **Human-Anchored Calibration:** Domain experts rate model responses against gold-standard rubrics using a streamlined card-based UI. The system computes statistical agreement (Spearman's $\rho$ and Quadratic Weighted Kappa) between the human raters and various LLM-based automated judges, nominating the highest-correlation judge as the workspace’s "defensible default."
+3. **Scored QA Evaluation:** Automated test runs evaluate multiple pipeline variants, prompt revisions, or models against the suite, using the calibrated judge to score the output on modular metrics like relevance, faithfulness, and completeness.
+4. **Autonomous Auto-Fix / AutoRAG:** Autonomous optimization loops analyze failures, flag low-performing chunked sources, propose and deploy prompt patches, and run grid searches over RAG retrieval parameters (such as $k$, chunk sizing, and rerank thresholds) to maximize the QA score.
+
+---
+
+## 2. Core Evaluation Engine (`QASuite` & `QATest`)
+
+At the base of the system are **QA Suites** (`QASuite`) and **QA Tests** (`QATest`). A suite is a logical grouping of test prompts, gold-standard reference answers, and scorer configurations.
+
+### 2.1 Test Cases and Golden Answers
+Each `QATest` within a suite represents an evaluation item consisting of:
+- **Prompt:** The user input/query to be tested.
+- **Golden Answer (Optional):** A reference ground-truth response written by a domain expert or validated during calibration.
+- **RAG Source Document (Optional):** Links back to the original source chunk or vector document from which the question was generated.
+
+#### SDK: Programmatic Suite Creation & List
+```typescript
+import { divinci } from "@divinci-ai/sdk";
+
+// Initialize and create a suite
+const suite = await divinci.qa.createSuite("workspace_abc", {
+  name: "Legal Intake Verification",
+  description: "Evals for handling complex legal intake prompts and routing",
+  scoreGenerators: [
+    { source: { type: "llm-correctness" }, weight: 2.0 },
+    { source: { type: "llm-completeness-coverage" }, weight: 1.0 },
+    { source: { type: "llm-faithfulness" }, weight: 1.0 }
+  ],
+  suggestionGeneration: {
+    merger: { id: "llama-3-3-70b-instruct" }
+  }
+});
+
+// Load all suites in a workspace
+const suites = await divinci.qa.listSuites("workspace_abc");
+```
+
+---
+
+### 2.2 Execution & Cost Accounting
+Running a large QA suite on every single prompt or model alteration can be slow and extremely expensive. The Scored QA execution engine incorporates several features to make this scalable.
+
+#### Cost & Latency Estimation (`/estimate`)
+Before a multi-release or Arena run is executed, clients should hit the estimation endpoint. This returns a dry-run cost projection based on the current pricing structure of target LLM APIs, input/output token sizes, and the count of score generators:
+```typescript
+const estimate = await divinci.qa.estimateRun("workspace_abc", suite._id, {
+  releaseId: "rel_12345",
+  maxTests: 150
+});
+
+console.log(`Estimated Cost: $${estimate.totalCostUSD}`);
+console.log(`Estimated Latency: ${estimate.latencySeconds}s`);
+```
+
+#### Online vs. Asynchronous Batch Runs
+To safeguard against rate-limits, network timeouts, and performance bottlenecks, the system dynamically switches execution modes based on suite scale:
+- **Online Execution:** Small runs (e.g., less than 10 tests) are run in a concurrent thread pool (`Promise.all` with a customizable `concurrency` window) and return the results immediately.
+- **Asynchronous Batch Jobs (`should-use-batch.ts`):** For larger runs, the API queues a batch job, allocates a budget escrow, and delegates running to an background worker (`advance-batch-job.ts`). This worker processes requests sequentially or in metered chunks, saving up to **60% in costs** by utilizing batch API endpoints (such as Google Vertex Batch or OpenAI Batch API) when available, and persisting intermediate states to handle cold container restarts.
+
+#### Ejecting Active Runs (`/cancel`)
+If a run behaves poorly (e.g., the prompt is garbled and returning empty strings, causing a massive score drop), developers can programmatically eject. The cancellation worker (`cancel-run.ts`) immediately flags the running job. The batch worker polls for this flag on its next inter-batch boundary (~6-second frequency) and exits cleanly, releasing the remaining budget escrow.
+
+---
+
+### 2.3 Suite Configuration Serialization
+For teams practicing GitOps or strict version control, suites can be exported and imported as round-trippable YAML or JSON files:
+```typescript
+// Export a suite schema to YAML for version control
+const yamlData = await divinci.qa.exportSuite("workspace_abc", suite._id, { format: "yaml" });
+
+// Import a suite schema to seed another environment
+const newSuite = await divinci.qa.importSuite("workspace_abc", {
+  format: "yaml",
+  content: yamlData
+});
+```
+
+---
+
+## 3. Score Generators & Grading Rubrics
+
+The evaluation of a response's quality is handled by modular **Score Generators** (graders). These judges use structured prompting to output granular evaluations, scores, and natural language reasoning.
+
+### 3.1 Rubric Structure
+Each score generator attaches to a specific rubric version. When a judge receives a model's output, it grades it against the rubric template. The rubric prompt contains strict JSON output instructions, returning a score between `0` and `1` (typically quantized in steps of `0.25` on the frontend for rating ease, but evaluated continuously on the backend).
+
+#### Available Out-of-the-Box Scorers:
+| Scorer Key | Evaluation Focus | Output Profile |
+|------------|------------------|----------------|
+| `llm-correctness` | Compares model response against the golden answer for factual consistency. | Binary/Continuous |
+| `llm-completeness-coverage` | Evaluates if all specific instructions in the prompt or reference guidelines were met. | Ordinal Scale |
+| `llm-faithfulness` | Measures RAG hallucination: determines if the response is fully supported by the retrieved context. | Binary/Continuous |
+| `llm-relevance` | Verifies if the model answered the user's question directly without extraneous fluff. | Continuous |
+| `llm-tone-alignment` | Grades response tone against predefined brand guidelines. | Continuous |
+
+---
+
+## 4. Human-Anchored Calibration & Statistics
+
+While automated judges are essential for continuous evaluation, they suffer from **judgment drift**—LLM judges routinely disagree with each other (empirical Spearman correlation rho is approximately 0.66 to 0.75). To make evaluations defensible, Divinci anchors judges to human domain experts.
+
+### 4.1 The Calibration Data Model (`ScoredQAHumanRating`)
+The `ScoredQAHumanRating` document captures human judgments of a model's response compared to automated scoring:
+
+```json
+{
+  "_id": "660c1d2e5a420b12cd53ef91",
+  "workspace": "ws_12345",
+  "rater": {
+    "userId": "auth0|6123abc456",
+    "displayName": "Dr. Sarah Jenkins",
+    "role": "domain-expert"
+  },
+  "testResultId": "660c1d1a5a420b12cd53ef22",
+  "scorerKey": "llm-completeness-coverage",
+  "rubricVersion": "a1f9e2b8c7d6e5f4",
+  "score": 0.75,
+  "reasoning": "Missed the secondary warning instruction, but correct overall.",
+  "durationMs": 14200,
+  "createdAt": "2026-07-06T09:12:44.200Z"
+}
+```
+
+The `rubricVersion` is a server-side `sha256(scorer.prompt).slice(0, 16)` hash of the evaluator's prompt template. If an administrator edits the grader's system instructions, historical ratings under the old version are marked as **stale**, preventing them from skewing the calibration statistics.
+
+---
+
+### 4.2 Inter-Rater Reliability & Agreement Statistics
+When multiple raters score responses, or when we compare human raters against automated LLM judges, the system evaluates calibration metrics via `/agreement` and `/inter-rater`.
+
+#### Mathematical Formulations
+
+##### 1. Spearman's Rank Correlation Coefficient (`rho`)
+Spearman's `rho` is the primary metric for continuous/ordinal ratings, measuring how closely the rank ordering of outputs by an LLM judge matches that of a human expert.
+
+Given `n` paired ratings, the raw scores are converted to ranks, and Spearman's `rho` is computed as:
+
+```text
+rho = 1 - (6 * sum(d_i^2)) / (n * (n^2 - 1))
+```
+
+where `d_i` is the difference between the ranks of each pair.
+
+##### 2. Quadratic Weighted Kappa (`wk`)
+While Spearman measures monotonic correlation, it does not adjust for chance agreement or penalize large-scale rating gaps effectively (e.g., human rates `1.0` but judge rates `0.0`). For this, we calculate Quadratic Weighted Kappa:
+
+```text
+kappa_w = 1 - (sum(w_i,j * O_i,j)) / (sum(w_i,j * E_i,j))
+```
+
+Where:
+- `O_i,j` is the observed proportion of times rater 1 assigns score `i` and rater 2 assigns score `j`.
+- `E_i,j` is the expected proportion of agreements under chance (the outer product of the raters' marginal distributions).
+- `w_i,j` is the quadratic weight of disagreement, defined as:
+
+```text
+w_i,j = (i - j)^2 / (k - 1)^2
+```
+
+with `k` being the number of possible rating levels.
+
+#### Defensible Judge Nominations
+If an LLM judge's correlation with the domain expert's ratings achieves **rho >= 0.85** across a minimum sample size (`n >= 30`, recommended `n >= 50`), the system nominates it as the **Defensible Default Judge**. All future automated runs are scored under this judge.
+
+```typescript
+// Fetch agreement metrics for a suite
+const metrics = await divinci.qa.getCalibrationAgreement("workspace_abc", {
+  suiteId: suite._id,
+  scorerKey: "llm-correctness"
+});
+
+console.log(`Recommended Judge: ${metrics.recommended_default_judge}`);
+console.log(`Spearman Rho (ρ): ${metrics.rho_per_judge[0].rho}`);
+```
+
+---
+
+### 4.3 Next-Priority Calibration Selection (`/next-priority`)
+To optimize domain expert time, the calibration interface does not present tests randomly. The `/next-priority` endpoint selects the next 10-20 items to rate using an active-learning selection algorithm:
+- It prioritizes **high-disagreement items**: test cases where different automated judges (or different raters) show high variance.
+- It prioritizes **low-confidence items**: cases where the judge was closest to a boundary threshold.
+- It excludes items already rated by the current user under the current `rubricVersion` to prevent duplication.
+
+---
+
+## 5. RAG Arena × Scored QA Active-Learning Loop
+
+A key innovation of the Divinci platform is the unification of offline calibration and live RAG Arena environments. Rather than keeping them isolated, data flows bidirectionally between them.
+
+```
+       ┌────────────────────────┐
+       │   RAG Arena (Online)   │
+       └───────────┬────────────┘
+                   │
+                   │ [Promote winner-picks]
+                   ▼
+       ┌────────────────────────┐
+       │   Scored QA (Offline)  │
+       └───────────┬────────────┘
+                   │
+                   │ [Calibrate & evaluate]
+                   ▼
+       ┌────────────────────────┐
+       │  Graduate High-Winners │
+       └────────────────────────┘
+```
+
+### 5.1 Route-Aware Performance Aggregation (`routePerformance`)
+To tie evaluation directly to architectural routing, `QATestResult` documents store routing snapshots taken at runtime:
+- `ragVectorGroupId`: The group of vector indexes active during generation.
+- `ragVectorIndexId`: The specific vector index searched.
+- `releaseSlugVersion`: The prompt version or deployment variant used.
+
+The `/route-performance` endpoint groups and aggregates QA test scores by these fields. This lets developers pinpoint exactly which vector indexes or prompt variants are causing regressions, and which ones are excelling.
+
+---
+
+### 5.2 Promoting Arena Impressions (`promoteFromArena`)
+When a real user picks a variant output in a live RAG Arena session (a "winner pick"), this interaction holds high signal. Under `/promote-from-arena`:
+- The system freezes the prompt, response, and active RAG index state.
+- It transforms the winner-pick impression into a `QATest` within the specified calibration suite.
+- This continuously populates the calibration corpus with real-world edge cases.
+
+---
+
+### 5.3 Active-Learning Ranker (`activeLearningCandidates`)
+The active-learning candidate ranker (`activeLearningCandidates`) scans live arena logs to surface the highest-EV messages to add to the suite. It calculates judge-vs-human disagreement:
+
+```text
+EV_improvement is proportional to:
+abs(HumanWinnerScore - max(JudgeScore(j) for j in RejectedVariants))
+```
+
+If a human user picked a response that the automated judge scored poorly, or if the judge assigned its highest score to a response the human rejected, this indicates a massive gap in the judge’s understanding. Adding this case to the calibration suite ensures the judge gets trained on its blind spots.
+
+---
+
+### 5.4 Pre-filtering Arena Candidates (`arenaPrefilter`)
+To minimize the substantial cost of generating responses for $N$ different variants during active testing, the `/arena-prefilter` endpoint acts as a gatekeeper:
+- It runs a lightweight, fast scoring model to predict the weighted-mean score of proposed variants.
+- It returns a `recommendedKeep` array: keeping the **Top-K Warm** (historically high-performing) variants, while keeping **All Cold** (new, exploratory) variants active.
+- This prunes clearly underperforming variants before they trigger costly downstream generations, cutting LLM operational costs by up to **40%**.
+
+---
+
+### 5.5 Graduation & Demotion (`graduateToArena`)
+Once an offline variant or routing configuration consistently achieves superior scores on the calibrated QA Suite, it can be programmatically **graduated** into the live RAG Arena preset. Conversely, live variants that have dropped in performance are automatically **demoted**. Running `graduateToArena` in `apply` mode automatically updates the workspace's active routing configuration.
+
+---
+
+## 6. Autonomous Auto-Fix & AutoRAG Agent Loop
+
+Evaluating models is only half the battle; fixing them is the other. The Scored QA suite features an autonomous healing agent pipeline designed to self-correct prompt templates and RAG configurations.
+
+### 6.1 The Auto-Fix Engine & Escrow
+An **Auto-Fix Loop** is a long-running, autonomous agent run. Because agents can easily spiral out of control and consume thousands of dollars in API calls, the system implements a strict **Escrow Budgeting System** (`calculate-escrow`):
+- Before a loop starts, the system calculates the maximum possible cost based on `maxIterations`, test counts, and the token bounds of the models used.
+- This amount is frozen as an escrow. If the agent runs out of escrow mid-run, it pauses and fires a webhook requiring manual escrow resolution (`resolveEscrowFailure`).
+
+---
+
+### 6.2 Diagnostic & Iteration Cycles
+During an iteration (`iteration.ts`), the agent executes the following loop:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    RUN QA EVALUATION                    │
+│      Evaluate current release against the QA suite       │
+└───────────────────────────┬─────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                    DIAGNOSE FAILURES                    │
+│  Identify low-scoring test items and parse reasoning    │
+└───────────────────────────┬─────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│               IDENTIFY FLAG CHUNKS & PATHS              │
+│ Locate problematic RAG chunks or prompt phrasing defects│
+└───────────────────────────┬─────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                 PROPOSE & APPLY PATCHES                 │
+│ Propose prompt template adjustments or chunk deletions │
+└───────────────────────────┬─────────────────────────────┘
+                            ▼
+┌─────────────────────────────────────────────────────────┐
+│                    VALIDATE PASSES                      │
+│ Verify that the patches do not introduce regressions    │
+└───────────────────────────┬─────────────────────────────┘
+                            ▼
+                  [Repeat or Complete]
+```
+
+#### Flagged Chunks (`flagged-chunks.ts`)
+If certain text chunks in a custom RAG index consistently lead to low faithfulness scores (e.g., outdated pricing sheets or conflicting instructions), the diagnostic step flags those vector chunks (`getFlaggedChunks`). The agent can mark them for active exclusion or propose a `patch-chunk` update.
+
+#### Resolving Obstacles & Human Intervention
+If an iteration loop runs for multiple cycles without achieving the designated `targetScore`, or if it reaches a performance plateau, the agent pauses, saves its snapshot state, and flags a `humanReviewRequired` status. Operators can resolve the blocker via `/human` by writing custom prompt guidelines or accepting/rejecting the agent's proposed patches before resuming.
+
+---
+
+### 6.3 AutoRAG Parameter Tuning
+While Auto-Fix focuses primarily on prompt editing and content pruning, **AutoRAG** (`autorag.ts`) focuses on systemic search space tuning. It executes grid and Bayesian search algorithms over:
+- **Retrieval $k$-value:** The count of documents retrieved.
+- **Chunk Size / Overlap:** The sliding boundaries of the text segments.
+- **Reranking Thresholds:** The minimum score threshold required to pass a document to the LLM context.
+
+It saves snapshots of optimized vector parameter structures, allowing the workspace to hot-swap to the top-performing configuration.
+
+---
+
+### 6.4 Streamlined Quick-Start Wizard (`quick-start.ts`)
+To dramatically lower the barrier to entry, the `/quick-start` endpoint exposes a streamlined, single-call wizard. In one POST request, it:
+1. Creates a new `QASuite` with default score generators.
+2. Uses the RAG file parser to generate representative evaluation test cases from provided document files.
+3. Spawns an active `AutoFix` loop to tune the default assistant against these files.
+
+This turns a multi-step setup into a single, automated command.
+
+---
+
+## 7. Post-Fine-Tune QA Validation Gate
+
+For teams fine-tuning models (e.g., LoRA, SFT), the QA suite serves as a final quality gate.
+
+```
+                  ┌──────────────────────┐
+                  │  Fine-Tuning Source  │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │ Export Run to SFT    │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │ Run SFT / LoRA Job   │
+                  └──────────┬───────────┘
+                             │
+                             ▼
+                  ┌──────────────────────┐
+                  │ Post-FT Validation   │
+                  │         Gate         │
+                  └──────────┬───────────┘
+                             │
+            ┌────────────────┴────────────────┐
+            │                                 │
+     [Passes Gate]                     [Fails Gate]
+            ▼                                 ▼
+   ┌──────────────────┐              ┌──────────────────┐
+   │ Deploy to Prod / │              │ Block Deployment │
+   │  Graduate Arena  │              │  & Alert Team    │
+   └──────────────────┘              └──────────────────┘
+```
+
+### 7.1 Post-FT Regression Verifier (`post-finetune-qa.ts`)
+Once a fine-tuning job is completed (e.g., trained on Modal), the `/post-finetune-qa` endpoint is invoked prior to staging deployment:
+- It spins up a temporary container running the fine-tuned candidate.
+- It executes the designated `QASuite` against it.
+- If the model's scores meet or exceed baseline criteria (and do not introduce catastrophic regressions), the gate is cleared, allowing safe automated deployment.
+
+---
+
+### 7.2 Fine-Tune Export Bridges (`exportRunToSft` & `trainFromQA`)
+If high-scoring runs are verified on a suite, those (prompt, response) pairs can be exported into an SFT JSONL format:
+- **`exportRunToSft`:** Converts a completed suite run’s top scoring items into a clean training format, ignoring any low-scoring or flagged hallucination items.
+- **`trainFromQA`:** Handles the entire process in one click. It compiles the training dataset, uploads it to storage, creates a `FineTuneAI` object, and kicks off a Modal-backed training job automatically.
+
+---
+
+## 8. TrustRuns: Cryptographic Verifiable Runs
+
+To allow enterprises to prove their model’s compliance, faithfulness, or accuracy to external auditors or third parties, Scored QA supports **TrustRuns** (`publish-to-trust.ts`).
+
+A TrustRun aggregates and packages a completed suite run into a signed manifest:
+- It compiles all prompts, model responses, intermediate RAG contexts, and judge-assigned scores.
+- It uploads the full audit payload to Cloudflare R2 storage using standard `eval-harness` formatting.
+- It produces a cryptographically signed public verification URL.
+- Third parties can inspect this verifiable manifest to audit the model's performance without requiring access to the internal MongoDB database.
+
+---
+
+## 9. API & Method Reference
+
+Below is a quick reference table of the primary REST endpoints exposed by the Scored QA and Calibration routers:
+
+| HTTP Method | Route | Description | Primary Controller |
+|-------------|-------|-------------|--------------------|
+| **POST** | `/scored-qa/suites` | Creates a new QA suite with scorers. | `root.ts -> createQASuite` |
+| **GET** | `/scored-qa/suites` | Lists all suites in the current workspace. | `root.ts -> listQASuites` |
+| **POST** | `/scored-qa/suites/copy-from` | Copies a suite and its tests from a source workspace. | `copy-from.ts -> copyQASuiteHandler` |
+| **POST** | `/scored-qa/suites/:suiteId/multi-release-run` | Runs a suite against multiple releases concurrently. | `multi-release-run.ts -> multiReleaseRun` |
+| **POST** | `/scored-qa/suites/:suiteId/arena-run` | Evaluates a suite across every variant in an arena preset. | `arena-run.ts -> arenaRun` |
+| **POST** | `/scored-qa/suites/:suiteId/estimate` | Computes a dry-run cost & latency estimate. | `estimate-run.ts -> estimateRun` |
+| **GET** | `/scored-qa/suites/:suiteId/calibration-report` | Combines latest run aggregates + Spearman correlation metrics. | `calibration-report.ts -> calibrationReport` |
+| **GET** | `/scored-qa/suites/:suiteId/route-performance` | Groups test results by active RAG vector group/index. | `route-performance.ts -> routePerformance` |
+| **POST** | `/scored-qa/suites/:suiteId/tests/bulk` | Bulk creates and attaches test items to a suite. | `bulk-create-tests.ts -> bulkCreateTestsForQASuite` |
+| **POST** | `/scored-qa/suites/:suiteId/promote-from-arena` | Promotes a live RAG Arena winner-pick into a QA test item. | `promote-from-arena.ts -> promoteFromArena` |
+| **POST** | `/scored-qa/suites/:suiteId/arena-prefilter` | Ranks and filters active variants before generation. | `arena-prefilter.ts -> arenaPrefilter` |
+| **POST** | `/scored-qa/suites/:suiteId/graduate-to-arena` | Promotes high-performing offline configurations to live. | `graduate-to-arena.ts -> graduateToArena` |
+| **POST** | `/scored-qa/calibration-ratings` | Logs or upserts a human calibration rating. | `create-rating.ts -> createCalibrationRating` |
+| **GET** | `/scored-qa/calibration-ratings/triples` | Returns a feed of available test result triples to rate. | `list-triples.ts -> listCalibrationTriples` |
+| **GET** | `/scored-qa/calibration-ratings/agreement` | Calculates Spearman $\rho$ and weighted kappa for judges. | `compute-agreement.ts -> computeCalibrationAgreement` |
+| **GET** | `/scored-qa/calibration-ratings/next-priority` | Identifies priority items requiring human evaluation. | `next-priority.ts -> nextPriorityForCalibration` |
+| **POST** | `/scored-qa/auto-fix` | Initiates an autonomous prompt/RAG optimization loop. | `root.ts -> startAutoFixLoop` |
+| **POST** | `/scored-qa/auto-fix/autorag` | Starts an agent-driven RAG parameter tuning cycle. | `autorag.ts -> startAutoRAGCycle` |
+| **POST** | `/scored-qa/quick-start` | Streamlined, single-call suite + test + loop bootstrap. | `quick-start.ts -> quickStartAutoFix` |
+| **POST** | `/scored-qa/post-finetune-qa` | Automated quality gate validation post fine-tuning. | `post-finetune-qa.ts -> postFineTuneQA` |
+| **POST** | `/scored-qa/suites/:suiteId/external-runs` | Grades answers from an outside AI system (import path). | `external-runs.ts` |
+| **POST** | `/scored-qa/suites/:suiteId/external-runs/live` | Asks a registered outside system the suite's questions and grades its replies. | `external-runs.ts` |
+| **PUT/GET** | `/scored-qa/suites/:suiteId/external-use` | Records / reads whether the suite's questions may leave Divinci. | `external-runs.ts` |
+| **POST/GET/DELETE** | `/scored-qa/suites/external-targets` | Registers, lists, deletes outside systems (the key is stored sealed). | `external-runs.ts` |
+| **GET** | `/scored-qa/suites/external-runs/:runId/compare` | Paired comparison against another external run or a release. | `compare-external-run.ts` |
+
+Grading an AI system Divinci does not run is covered in [QA an External AI System](/server/external-qa/).

@@ -1,0 +1,297 @@
+---
+title: n8n & Make
+description: Connect n8n or Make to the hosted Divinci MCP server and give an AI agent ~200 Divinci tools.
+---
+
+import { Steps, Aside } from "@astrojs/starlight/components";
+
+Divinci runs a hosted MCP server at **`mcp.divinci.app`**. Both
+[n8n](https://n8n.io) and [Make](https://make.com) can act as MCP *clients*, so
+connecting them is configuration, not code: point the client at one URL, give it
+an API key, and an AI agent in your workflow can call Divinci's tools — chat,
+RAG, transcripts, releases, connectors and more — with no HTTP nodes to wire by
+hand.
+
+## The whole integration, in three values
+
+| | |
+|---|---|
+| **Endpoint** | `https://mcp.divinci.app/mcp` |
+| **Transport** | Streamable HTTP |
+| **Auth header** | `Authorization: Bearer divinci_…` |
+
+<Aside type="caution" title="Do not use SSE">
+The legacy SSE transport (`/sse` + `/message`) was **retired on 2026-08-07** and
+now returns **HTTP 410 Gone**. Many MCP clients still default to SSE, or append
+`/sse` to whatever base URL you give them.
+
+If your client offers a transport choice, pick **Streamable HTTP**. If it asks
+for a URL, give it one ending in **`/mcp`** — not `/sse`, and not the bare host.
+</Aside>
+
+## 1. Mint an API key
+
+<Steps>
+
+1. In the Divinci app, go to **WhiteLabel → Setup → Embed → API Keys → Create**.
+
+2. Leave **every permission box unchecked** and the **IP whitelist empty**.
+
+3. Copy the key. It is 91 characters and starts with `divinci_`, and it is shown
+   once.
+
+</Steps>
+
+<Aside type="caution" title="Use an empty-permissions key — a scoped one may be denied everything">
+An empty permissions array means **full access within that one whitelabel**. The
+key is already scoped to a single workspace, so "no permissions" reads as "all
+permissions here", and MCP resolves such a key to the default set
+`whitelabel:rag`, `whitelabel:config`, `whitelabel:finetune`, `transcript:view`,
+`transcript:use` — exactly what the tool checks are written against.
+
+**A key with boxes checked is a different story, and today it is a sharp edge.**
+The checked scopes are passed to the MCP server verbatim, and only some of them
+are names MCP recognises:
+
+| Checked box | Works over MCP? |
+|---|---|
+| `rag:read`, `rag:write` | Yes |
+| `release:read`, `release:write` | Yes |
+| `finetune:read`, `finetune:write` | Yes |
+| **`transcript:read`, `transcript:write`** | **No — and these are the chat scopes** |
+| `whitelabel:read`, `whitelabel:write`, `analytics:read`, `byok:*` | No |
+
+The first three groups work because the checkbox name happens to be spelled the
+same as the MCP scope. The rest are not MCP scope names and do not map to one, so
+they contribute **no** access — a key scoped with only "Write Transcripts" reaches
+*no* MCP tool at all, while the same key works fine against the REST API.
+
+**How the refusal actually looks.** Verified against production on 2026-08-28
+from a real n8n instance, with a key scoped `rag:read,release:read,transcript:read`:
+
+```text
+Permission denied: You don't have access to the "list_transcripts" tool.
+Required scope: chat:read
+```
+
+The message is accurate and names the scope, so the failure is easy to read once
+you see it. Two things about it are still worth knowing:
+
+- **The scope it asks for is not one you can check a box for.** `list_transcripts`
+  wants `chat:read`; the key UI and the CLI offer `transcript:read`, accept it
+  without complaint, and it buys nothing.
+- **The tool list is not filtered by your scopes.** `tools/list` returns all ~200
+  tools whatever the key can do, so an AI agent will happily plan a step it cannot
+  execute and only discover it at run time. In n8n, restrict the node's tool list
+  to the ones your key's scopes cover.
+
+**And the chat scope cannot be minted at all.** Verified against production on
+2026-08-28: the API validates permission names (an invented one is rejected
+`400 bad form data`), but `chat:read` — the scope the chat and transcript tools
+require — comes back `403 Permission denied`. `transcript:read` is accepted and
+grants nothing over MCP. There is currently **no scoped key that reaches the chat
+or transcript tools**.
+
+So this is not a preference: mint the key for MCP with **no boxes checked**. That
+is the only configuration that works today.
+</Aside>
+
+## 2a. n8n
+
+n8n's **MCP Client Tool** node (`n8n-nodes-langchain.toolmcp`) is a sub-node: it
+attaches to an **AI Agent** node and hands that agent the server's tools.
+
+<Steps>
+
+1. Add an **AI Agent** node to your workflow.
+
+2. Attach an **MCP Client Tool** sub-node to it.
+
+3. For the connection type choose **HTTP Streamable**, *not* SSE — the SSE option
+   points at an endpoint that returns 410.
+
+4. Set the endpoint to `https://mcp.divinci.app/mcp`.
+
+5. Create a credential with **Bearer** authentication and paste the `divinci_…`
+   key as the token. (If your n8n version only offers header auth, add a header
+   named `Authorization` with the value `Bearer divinci_…`.)
+
+6. Optionally restrict which tools the agent may call. The server exposes around
+   200; handing an agent all of them makes its tool-selection worse, not better.
+
+</Steps>
+
+### Calling one tool directly (no AI agent)
+
+The **MCP Client** node (`@n8n/n8n-nodes-langchain.mcpClient`) is a regular node
+rather than an agent sub-node, so it can sit anywhere in a pipeline and call a
+single named tool. This is the smallest thing that proves the connection works.
+The parameters below are a working configuration, executed against
+`mcp.divinci.app` on 2026-08-28:
+
+```json
+{
+  "serverTransport": "httpStreamable",
+  "endpointUrl": "https://mcp.divinci.app/mcp",
+  "authentication": "bearerAuth",
+  "tool": { "__rl": true, "mode": "id", "value": "search_tools" },
+  "inputMode": "json",
+  "jsonInput": "{ \"query\": \"rag\" }"
+}
+```
+
+The credential is n8n's built-in **Bearer Auth** type (`httpBearerAuth`) with the
+`divinci_…` key as the token. The node emits one item whose `content` is the MCP
+tool result:
+
+```json
+{ "content": [ { "type": "text", "text": "Found 5 tools matching \"rag\": …" } ] }
+```
+
+`search_tools` is a good first call because it needs no scopes and no data in the
+workspace — if it returns and a tool you want does not, the difference is your
+key's scopes, not the connection.
+
+<Aside type="note">
+The HTTP Streamable option arrived in n8n after the original SSE-only release of
+this node. If your instance offers **only** "SSE Endpoint", it predates that
+support and cannot talk to Divinci — upgrade n8n rather than trying to make the
+SSE path work.
+</Aside>
+
+## 2b. Make
+
+Make's **MCP Client** app connects a scenario or a Make AI Agent to an external
+MCP server.
+
+<Steps>
+
+1. Add an **MCP Client** module, or attach one as a tool on a Make **AI Agent**.
+
+2. Create a connection. For **MCP Server**, choose **+ new MCP server** — Divinci
+   is not in Make's verified-server dropdown, so the URL is not prefilled.
+
+3. Set **URL** to `https://mcp.divinci.app/mcp`.
+
+4. Put the `divinci_…` key in **API Key / Access Token**.
+
+5. Use **Call a Tool / Request** to invoke one tool directly — it is the fastest
+   way to confirm the connection before wiring an agent around it.
+
+</Steps>
+
+<Aside type="caution" title="If Make returns 410">
+Make's docs describe its verified servers largely in terms of SSE endpoints and
+do not clearly document a transport switch. If a call fails with **410 Gone**,
+the client reached `/sse`: make sure the URL you saved ends in `/mcp` and that
+nothing has appended `/sse` to it.
+</Aside>
+
+## 3. Verify the endpoint independently
+
+Two checks that need no client and no key, and that tell you whether a failure is
+yours or ours:
+
+```bash
+# Reachable, and correctly refusing an unauthenticated caller:
+curl -i -X POST https://mcp.divinci.app/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+       "protocolVersion":"2025-06-18","capabilities":{},
+       "clientInfo":{"name":"curl","version":"0"}}}'
+# → HTTP 401 with a WWW-Authenticate: Bearer header. This is the healthy answer.
+
+# The retired transport, so you can recognise it:
+curl -o /dev/null -w '%{http_code}\n' https://mcp.divinci.app/sse
+# → 410
+```
+
+`https://mcp.divinci.app/info` also answers unauthenticated, and reports the
+endpoint the server considers current under `protocols.mcp.streamableHttpEndpoint`.
+
+## What you get
+
+Around 200 tools across 40 modules. The ones most workflows reach for:
+
+| Area | Tools |
+|---|---|
+| Chat | `chat_create`, `chat_send_message`, `chat_get_history`, `chat_list` |
+| RAG | `rag_search`, `rag_list_files`, `rag_upload_prepare`, `rag_upload_finalize`, `rag_get_file_status` |
+| Connectors | `connector_list`, `connector_sync`, `connector_sync_status`, `connector_stats` |
+| Releases | `release_list`, `release_get`, `release_publish` |
+| Identity | `whoami` — the cheapest possible connection test |
+
+The full list is in the [Tool Catalog](/mcp/tool-catalog/).
+
+<Aside type="tip">
+Call `whoami` first. It requires no arguments and no write scope, so it separates
+"my credential works" from "my tool call is wrong" in one step.
+</Aside>
+
+## Troubleshooting
+
+| Symptom | Cause |
+|---|---|
+| **410 Gone** | The client reached `/sse` or `/message`. Use `/mcp` and the Streamable HTTP transport. |
+| **401** with `WWW-Authenticate: Bearer` | No key, or the header is not `Authorization: Bearer divinci_…`. The MCP server does **not** read `X-API-Key` — that header works on the REST API (`/api/v1/*`), not here. |
+| **401** with a key you believe is valid | The key was revoked, expired, or has an IP whitelist that excludes your client's egress. n8n Cloud and Make call from their own IPs, not yours. |
+| **404** `MCP is not enabled for this whitelabel` | You used the whitelabel-scoped URL `/{whitelabelId}/mcp` for a workspace with no MCP-enabled release. The root `/mcp` resolves the workspace from the key itself and is the right URL for an API key. |
+| **Every** tool denied, including `whoami` | Almost certainly a key scoped with `transcript:*`, `whitelabel:*`, `analytics:read` or `byok:*` — none of which MCP recognises as scopes. Re-mint with no boxes checked. |
+| One tool missing or denied | The release curates its exposed tools, or the key lacks that tool's scope. Retest with an empty-permissions key to tell the two apart. |
+
+## The other direction: let Divinci push into your workflow
+
+Everything above is your workflow calling Divinci. For Divinci to call *you* —
+a webhook into an n8n Webhook node or a Make custom webhook — you need a
+**delivery channel** pointing at that URL and a **trigger** that routes events
+into it.
+
+**Configure both with the MCP tools you are already connected to.** The REST API
+cannot do it: `/api/v1` exposes notifications read-only (`GET /notifications`,
+`GET /notifications/counts`, `PATCH /notifications/{id}/read`), and
+delivery-channel and trigger CRUD live only on the JWT-authenticated
+`/white-label/*` router, which an API key cannot reach. The MCP surface has no
+such gap:
+
+| Tool | |
+|---|---|
+| `notification_channel_create` | Point a channel at your n8n/Make webhook URL, with an HMAC secret |
+| `notification_channel_test` | Send a test delivery before wiring anything to it |
+| `notification_channel_verify` | Required for email channels |
+| `notification_trigger_create` | Route matching events into the channel |
+| `notification_channel_logs` | The last 100 delivery attempts — start here when nothing arrives |
+
+These need `notification:read` / `notification:write`, which an
+**empty-permissions key resolves to**. (See the scope caution above — this is
+another reason to mint the key with no boxes checked.)
+
+Then handle the delivery correctly on your side: verify the HMAC, respect the
+±300s replay window, and treat `X-Divinci-Event-ID` as an idempotency key,
+because a slow-but-successful handler will be retried with the same event. The
+full receiving contract, with verification code, is in
+[Notifications, Analytics & Metrics](/server/observability/#receiving-a-webhook).
+
+<Aside type="caution" title="Failure notifications are new, and partial">
+`emitStepFailed` was dead code until 2026-08-28 — a workspace that had ticked
+"notify me on failure" received nothing. It now fires at the two terminal
+boundaries of RAG file ingestion.
+
+Two limits worth knowing before you build on it: the failed event reports
+`stepId: "chunking"`, so a trigger scoped to a different step (embedding,
+storing, indexing) will not match it; and of the eight digest steps the
+configuration UI offers, only `file-upload` and `chunking` emit anything at all.
+Scope your trigger accordingly, and test it with
+`notification_channel_test` rather than assuming.
+</Aside>
+
+## Which endpoint, and when
+
+| URL | Use it for |
+|---|---|
+| `https://mcp.divinci.app/mcp` | **API keys.** The workspace is resolved from the key. This is the n8n/Make path. |
+| `https://mcp.divinci.app/{whitelabelId}/mcp` | Multi-tenant OAuth clients acting for a specific workspace. Requires MCP enabled on that whitelabel, and 404s otherwise. |
+
+Staging and dev run the same server at `mcp.stage.divinci.app` and
+`mcp.dev.divinci.app` — useful for testing a workflow without spending against
+production.

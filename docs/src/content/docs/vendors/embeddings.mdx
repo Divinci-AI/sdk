@@ -1,0 +1,80 @@
+---
+title: Embeddings
+description: The embedding models Divinci can use, and how to pick between throughput and quality.
+---
+
+import { Aside } from "@astrojs/starlight/components";
+import ToolCatalogTable from "../../../components/ToolCatalogTable.astro";
+
+<ToolCatalogTable type="RAG/EmbeddingGenerator" />
+
+<Aside type="danger" title="Never mix embedding models inside one vector">
+Vectors produced by two different models live in **incompatible spaces**, even
+at identical dimensionality. Mixing them does not error — similarity search just
+quietly gets worse, in a way that looks like "the corpus isn't very good". The
+vector's `embeddingModel` is the source of truth; do not override it per
+request.
+</Aside>
+
+## Picking by ingestion shape, not by quality alone
+
+The two Gemini embedding models differ far more in **rate limit** than in
+output quality, and that is usually what decides:
+
+| Model | Requests/min | API mode | Use for |
+| --- | --- | --- | --- |
+| `gemini-embedding-001@1536` | ~100K | batched | **Catalog imports and any batch over ~100 files.** Survives parallel ingestion. |
+| `gemini-embedding-2-preview@1536` | ~4K | unbatched | **Individual uploads and quality-sensitive corpora.** Saturates immediately under batch load. |
+
+Practical rule:
+
+- **A single PDF, transcript or page** — either model finishes inside the
+  window, even with hundreds of chunks.
+- **A catalog of 30 or fewer items** — either works; the preview model will hit
+  its cap briefly and the retry chain absorbs it.
+- **A bulk import, or a fresh corpus reseed** — use `gemini-embedding-001`, or
+  ingest through a temporary vector on it and re-embed later.
+
+**The failure signature of getting this wrong** is a pile of
+`Temporary API error (429)` / `Quota exceeded for … online_prediction_requests`
+entries in the vector's failed sources. That is a rate cap, not a bug: retries
+do eventually succeed, at the cost of hours of wall-clock.
+
+## Voyage AI
+
+`voyage-4-large`, `voyage-4`, `voyage-4-lite` and `voyage-3.5` are 1024-dimension models from
+[Voyage AI](https://www.voyageai.com/), reached through MongoDB Atlas's hosted endpoint or Voyage's own. What is
+different about them:
+
+- **Two ways to pay for the calls.** Where Divinci has enabled its own Voyage key you can use it; you can also
+  save your own key (provider `VOYAGE`, under **Tools → Providers**) and attach it to a vector. With your own
+  key the embedding calls go straight to your Voyage account and Divinci adds **no embedding charge** on top; a
+  step that costs Divinci compute is still billed as usual. `GET /api/v1/rag/embedding-models` reports, per model,
+  whether it takes `divinci`'s key, `byok` only, or `either`.
+- **Asymmetric.** Documents and queries are embedded with different `input_type`s. Divinci sets this for you:
+  documents at ingest, queries at search.
+- **A lower similarity scale than Gemini or BGE.** Voyage cosine scores for relevant passages sit lower, so a new
+  Voyage vector defaults to a minimum similarity of **0.40**, not 0.62 (at 0.62 only about 15–50% of relevant
+  passages survived in our measurements on SciFact and SciDocs). That is two corpora, so tune
+  `minimumSimilarity` for yours.
+- **Not recommended by default.** On SciFact, `voyage-4` scored below `gemini-embedding-001` in our retrieval lab.
+  They are offered for teams that already use Voyage, or want to compare.
+
+<Aside type="caution" title="Changing to or from Voyage needs a new vector">
+Moving a vector that already holds embeddings onto or off a Voyage model is refused: the spaces are not
+comparable, and a same-dimension swap would not error, it would just retrieve badly. Create a new vector with the
+model and upload files to it directly. Re-indexing through the queued path (crawls, connectors, migrate) does not
+support Voyage yet.
+</Aside>
+
+## Dimensions
+
+`1536` and `3072` variants of `gemini-embedding-001` are separate tools because
+dimensionality is part of the vector's contract — the store is created at that
+width. Larger is not free: it costs proportionally more storage and query time
+for a gain that is corpus-dependent.
+
+## See also
+
+- [RAG & Vector Stores](/vendors/rag/)
+- [RAG Knowledge Base](/server/rag/)

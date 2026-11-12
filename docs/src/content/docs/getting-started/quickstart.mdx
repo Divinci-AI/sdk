@@ -1,0 +1,149 @@
+---
+title: Quick Start
+description: Send your first message and run your first server operation in minutes.
+---
+
+import { Tabs, TabItem, Steps, Aside } from "@astrojs/starlight/components";
+
+This page gets a working integration in front of you fast. Pick the package that
+matches where your code runs — see [Introduction](/getting-started/introduction)
+if you're unsure.
+
+## Browser chat — Client SDK
+
+The client works in terms of **threads**: you open a chat thread, then send or
+stream messages into it.
+
+<Steps>
+
+1. **Install the package**
+   ```bash
+   npm install @divinci-ai/client
+   ```
+
+2. **Initialize the client**
+   ```typescript
+   import { DivinciClient } from "@divinci-ai/client";
+
+   const client = new DivinciClient({
+     releaseId: "rel_your-release-id",
+     apiKey: "divinci_key_...", // for browsers in production, prefer a user token — see Authentication
+   });
+   ```
+
+3. **Open a thread and stream a reply**
+   ```typescript
+   const thread = await client.chat.create();
+
+   const reply = await client.chat.stream(thread.id, "Hello, how can you help me?", {
+     assistantName: "your-assistant-id", // the release's assistant/model id
+     onChunk: (text) => process.stdout.write(text),
+   });
+   console.log(reply.content);
+   ```
+
+</Steps>
+
+<Aside type="caution" title="assistantName is required">
+  The live message endpoint requires `assistantName` — the assistant/model id
+  configured on your Release (visible on the release document as
+  `assistant.id`). Omitting it returns `400 bad form data`.
+</Aside>
+
+### Why stream() and not send()?
+
+Replies are generated asynchronously: `chat.send()` returns an
+**acknowledgement** while generation continues server-side. `chat.stream()`
+holds the connection and resolves with the assistant's message — it's the
+right default. To fetch history later, use `chat.getTranscript(thread.id)`.
+
+<Aside type="note">
+  Want a chat without managing a thread or signing in users? Use
+  `client.chat.createAnonymous()` for an ephemeral thread, or the
+  [Embed script](/embed/overview) for a fully-rendered widget.
+</Aside>
+
+## Server-side operations — Server SDK
+
+<Steps>
+
+1. **Install the package**
+   ```bash
+   npm install @divinci-ai/server
+   ```
+
+2. **Initialize the client**
+   ```typescript
+   import { DivinciServer } from "@divinci-ai/server";
+
+   const divinci = new DivinciServer({
+     apiKey: process.env.DIVINCI_API_KEY,
+   });
+   ```
+
+3. **Create a workspace**
+   ```typescript
+   const workspace = await divinci.workspaces.create({
+     name: "My AI Assistant",
+   });
+   ```
+
+</Steps>
+
+### Upload a document to a knowledge base
+
+RAG documents belong to a **collection** (a vector index) inside a workspace.
+Create the collection, then upload a file buffer to it:
+
+```typescript
+import { readFileSync } from "node:fs";
+
+const collection = await divinci.rag.createCollection({
+  workspaceId: workspace.id,
+  name: "Product docs",
+});
+
+const file = readFileSync("./knowledge.pdf");
+
+const doc = await divinci.rag.uploadDocument(
+  workspace.id,
+  collection.id,
+  file,
+  "knowledge.pdf",
+  { mimeType: "application/pdf" },
+);
+
+// Wait for chunking + embedding to finish before querying
+await divinci.rag.waitForProcessing(workspace.id, collection.id, doc.id);
+```
+
+## MCP integration — MCP SDK
+
+```typescript
+import { McpClient } from "@divinci-ai/mcp";
+
+const mcp = new McpClient({
+  serverUrl: "https://mcp.divinci.app",
+});
+
+await mcp.connect();
+
+// Tool discovery and invocation live on the `tools` accessor
+const tools = await mcp.tools.listTools();
+
+const result = await mcp.tools.callTool("search_knowledge", {
+  query: "return policy",
+});
+```
+
+<Aside type="caution">
+  The MCP client authenticates with **Auth0 (PKCE)**, not an API key — see
+  [MCP Authentication](/mcp/authentication). Tools that charge per call use the
+  [x402 payment flow](/mcp/payments).
+</Aside>
+
+## Next steps
+
+- [Authentication](/getting-started/authentication) — API keys, user tokens, and external users.
+- [Error Handling](/getting-started/error-handling) — the error classes every package throws.
+- [Client SDK](/client/overview) · [Server SDK](/server/overview) · [MCP SDK](/mcp/overview)

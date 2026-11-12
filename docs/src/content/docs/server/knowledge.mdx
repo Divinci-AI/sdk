@@ -1,0 +1,179 @@
+---
+title: "Knowledge (RAG) Settings"
+description: "Wire a Release to its knowledge base — vectors and vector groups, recency weighting, chunk caps, citation display, product sub-replies, pipelines, and memory."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+Most settings in this group **point at something you build elsewhere**. A
+Release does not hold a knowledge base; it references one. Build the vector
+first — see [RAG Knowledge Base](/server/rag/) for creating one, choosing an
+embedding model, and feeding it by upload, crawl, or product-catalog sync.
+
+| Setting | Field | In the SDK? |
+| --- | --- | --- |
+| [Vectors / vector group](#attaching-knowledge) | `ragIndexes`, `ragVectorGroupId` | ✅ |
+| [Recency weighting](#recency-weighting) | `ragRecency` | ✅ |
+| [Max context chunks](#max-context-chunks) | `rerankMaxChunks` | ✅ |
+| [Retrieval gate](#skipping-retrieval) | `ragTrigger` | ✅ |
+| [Citation display](#citation-display) | `ragContextDisplayMode` | ✅ |
+| [Product sub-replies](#product-sub-replies) | `productSubReplies` | ✅ |
+| [Workflow pipelines](#workflow-pipelines) | `outputPipelineId`, `productOutputPipelineId` | ✅ |
+| [Memory](#memory) | `memory` | ❌ — and see the caveat |
+
+## Attaching knowledge
+
+Two mutually exclusive ways to attach:
+
+```typescript
+// Individual vectors
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  ragIndexes: [{ id: "vec_abc" }, { id: "vec_def" }],
+});
+```
+
+Or one **vector group** — a saved bundle with its own merge policy, set through
+`ragVectorGroupId`. Picking a group disables the individual list: it is one or
+the other, not both.
+
+A group is created on the RAG vectors page (Groups tab) and carries:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `ragVectorIds` | — | Ordered, **minimum 2** |
+| `mergeStrategy` | `interleave` | `interleave` alternates chunks so every vector gets a voice; `concatenate` takes them in order |
+| `maxChunksPerVector` | `3` | Caps how much any one vector contributes |
+
+Reach for `interleave` when the vectors are peers and you want balanced
+coverage; `concatenate` when the order expresses priority and you want the first
+vector to dominate.
+
+## Recency weighting
+
+Lets newer content outrank older matches. Defaults, once enabled: weight `0.3`,
+half-life `180` days — a document loses half its recency boost every six months.
+Unset at the Release level, resolution falls through to the vector's own setting.
+
+Worth turning on for changelogs, news, or policy docs where stale answers are
+wrong answers; leave it off for reference material where age is irrelevant and
+recency weighting would just distort ranking.
+
+## Max context chunks
+
+`rerankMaxChunks` caps how many retrieved chunks survive the cross-index
+merge-rerank and reach the prompt.
+
+| Value | Effect |
+| --- | --- |
+| unset | Platform default of **8** |
+| *n* | At most *n* chunks |
+| `0` | Disables the trim entirely |
+
+Lower means fewer prompt tokens and faster prefill, at the cost of fewer
+grounding sources. Note `0` does **not** mean "no chunks" — it means "no cap",
+which is the opposite of what the number suggests.
+
+## Skipping retrieval
+
+`ragTrigger` decides whether retrieval runs at all for a turn:
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  ragTrigger: { mode: "heuristic", minChars: 4 },
+});
+```
+
+`heuristic` skips retrieval for messages that plainly need no grounding —
+greetings, acknowledgements, chit-chat — saving both latency and prompt tokens.
+`always` (the default) always retrieves. `minChars` is the trimmed-length floor
+below which a message skips, and `skipPatterns` adds case-insensitive regexes on
+top of the built-in greeting set.
+
+<Aside type="note" title="It never skips when grounding is required">
+If the Release enforces on-topic moderation (`minimumContext` or `minimumTokens`
+above zero), retrieval always runs regardless of `ragTrigger` — otherwise the
+gate would block every greeting for want of context it deliberately skipped
+fetching. See [Safety → On-topic](/server/safety/#on-topic-moderation).
+</Aside>
+
+## Citation display
+
+Purely cosmetic — what the source citations under a reply look like:
+
+| `ragContextDisplayMode` | Shows |
+| --- | --- |
+| `full` | Title with hover preview |
+| `title` | Title only |
+| `hidden` | Nothing |
+
+This changes presentation only. It does not affect what was retrieved, what
+reached the model, or what it answered.
+
+## Product sub-replies
+
+When a reply mentions something from your product catalog, the server can
+decorate the mention inline and spawn a follow-up product card. The catalog
+itself is built on its own page — imported from a file or synced from
+WooCommerce, Shopify, or Squarespace.
+
+```typescript
+await divinci.releases.updateInWorkspace(workspaceId, releaseId, {
+  productSubReplies: {
+    enabled: true,
+    maxProducts: 1,
+    matchThreshold: 0.5,
+    retroMatch: { enabled: true, mode: "name-mention" },
+  },
+});
+```
+
+`retroMatch` scans the model's finished reply for products it named, even when
+the product's chunk was not retrieved that turn. Its `mode` is the precision dial:
+
+| Mode | Behaviour |
+| --- | --- |
+| `name-mention` (default) | The product name must literally appear. Highest precision |
+| `bm25-full` | Ranks over name + keywords + description. Higher recall, more false positives on common domain words |
+| `rag-candidates` | Only products retrieval surfaced this turn. Never invents one the retriever did not see |
+
+## Workflow pipelines
+
+`outputPipelineId` and `productOutputPipelineId` point at visual node-canvas
+pipelines that post-process how retrieval and responses are assembled. Every
+Release ships with a simple RAG default; branch from it when you need logic the
+flat settings above cannot express.
+
+## Memory
+
+<Aside type="danger" title="This setting currently records intent and does nothing">
+`release.memory` is validated, saved, and carried forward when you fork a
+Release — but **no generation path ever reads it**. The live memory feature is
+`ProfileMemoryService.compactThread(whitelabelId, …)`, which is keyed on the
+**workspace**, not the Release.
+
+So setting a memory provider here changes no behaviour today. Configure memory
+at the workspace level (`/white-label/{workspaceId}/memory`), and treat the
+per-Release field as forward-looking configuration rather than something you can
+verify by testing a chat.
+</Aside>
+
+## Gotchas
+
+- **A vector group and individual vectors are exclusive.** Setting a group
+  disables the list; do not expect the union.
+- **A group needs at least two vectors.** One vector is just a vector.
+- **`rerankMaxChunks: 0` disables the cap, not retrieval.** If you want less
+  context, use a small number, not zero.
+- **Citation display is not a privacy control.** `hidden` stops rendering
+  sources; it does not stop them being retrieved or sent to the model. To
+  restrict what the model sees, change what is attached.
+- **Retrieval quality changes when de-identification is on.** Queries run against
+  the *redacted* message, so a corpus keyed on names, dates, or locations loses
+  recall. Test retrieval with [de-identification](/server/de-identification/)
+  enabled, not before.
+
+## Related
+
+- [RAG Knowledge Base](/server/rag/) — creating and feeding vectors
+- [Caching & Performance](/server/caching/) — semantic caches over retrieval
+- [Safety](/server/safety/) — on-topic moderation, judged against retrieved context

@@ -1,0 +1,113 @@
+---
+/**
+ * Search override: renders Starlight's default Pagefind-backed search, then
+ * injects a "Popular searches" panel into the otherwise-empty modal. Clicking a
+ * chip fills the Pagefind input and triggers a real search, so the empty state
+ * is a useful launchpad instead of a blank box.
+ */
+import Default from "@astrojs/starlight/components/Search.astro";
+---
+
+<Default {...Astro.props}><slot /></Default>
+
+<script>
+  // Most-likely entry points for these docs (mirrors the main sidebar areas).
+  const SUGGESTIONS = [
+    "Install the CLI",
+    "Anonymous chat",
+    "Create a release",
+    "RAG knowledge base",
+    "Connect an MCP server",
+    "Streaming responses",
+  ];
+
+  function buildPanel(input: HTMLInputElement): HTMLElement {
+    const panel = document.createElement("div");
+    panel.className = "da-search-suggestions";
+    const heading = document.createElement("p");
+    heading.className = "da-search-suggestions__heading";
+    heading.textContent = "Popular searches";
+    panel.appendChild(heading);
+    const chips = document.createElement("div");
+    chips.className = "da-search-suggestions__chips";
+    for (const term of SUGGESTIONS) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "da-search-suggestions__chip";
+      chip.textContent = term;
+      chip.addEventListener("click", () => {
+        input.value = term;
+        // Pagefind listens for `input` to run the query.
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.focus();
+      });
+      chips.appendChild(chip);
+    }
+    panel.appendChild(chips);
+    return panel;
+  }
+
+  function ensureSuggestions() {
+    const input = document.querySelector<HTMLInputElement>(
+      "#starlight__search input.pagefind-ui__search-input",
+    );
+    const container = document.querySelector("#starlight__search");
+    if (!input || !container) return;
+    if (container.parentElement?.querySelector(".da-search-suggestions")) {
+      sync(input);
+      return;
+    }
+    const panel = buildPanel(input);
+    // Place the panel just after the Pagefind UI container.
+    container.insertAdjacentElement("afterend", panel);
+    input.addEventListener("input", () => sync(input));
+    sync(input);
+  }
+
+  function sync(input: HTMLInputElement) {
+    const panel = document.querySelector<HTMLElement>(".da-search-suggestions");
+    if (panel) panel.hidden = input.value.trim().length > 0;
+  }
+
+  // The Pagefind UI mounts lazily when the modal first opens, so watch for it.
+  const observer = new MutationObserver(() => ensureSuggestions());
+  observer.observe(document.body, { childList: true, subtree: true });
+  ensureSuggestions();
+</script>
+
+<style is:global>
+  .da-search-suggestions {
+    margin-top: 1rem;
+    padding-top: 0.25rem;
+  }
+  .da-search-suggestions[hidden] {
+    display: none;
+  }
+  .da-search-suggestions__heading {
+    margin: 0 0 0.6rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+  }
+  .da-search-suggestions__chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .da-search-suggestions__chip {
+    padding: 0.45rem 0.8rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+    font-size: var(--sl-text-sm);
+    cursor: pointer;
+    transition: border-color 0.12s ease, background 0.12s ease;
+  }
+  .da-search-suggestions__chip:hover {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-gray-5);
+  }
+</style>

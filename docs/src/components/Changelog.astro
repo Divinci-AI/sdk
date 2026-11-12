@@ -1,0 +1,212 @@
+---
+/**
+ * Changelog renderer.
+ *
+ * Entries come from `src/data/changelog.ts` and are grouped by date. Every
+ * entry gets a stable `id`, so `/changelog/#2026-08-12-wake-every-n-hours`
+ * lands on that change — which is the whole point of the page: a release note
+ * you can send someone a link to, rather than "scroll to August".
+ *
+ * Each title links to that entry's OWN page, which carries its own Open Graph
+ * image — a fragment cannot, since every `#…` here resolves to this same
+ * document and unfurls with one shared picture. The small "#" beside it is the
+ * in-page anchor, kept because those URLs were published first.
+ *
+ * Dates render in UTC deliberately. `toLocaleDateString` with no timezone uses
+ * the BUILD machine's zone, so a date near midnight would show differently
+ * depending on where the site was built — a changelog that quietly disagrees
+ * with itself between deploys.
+ */
+import { CHANGELOG, type ChangelogEntry } from "../data/changelog";
+
+const byDate = new Map<string, ChangelogEntry[]>();
+for (const entry of CHANGELOG) {
+  const list = byDate.get(entry.date) ?? [];
+  list.push(entry);
+  byDate.set(entry.date, list);
+}
+// Newest first, regardless of the order entries were appended in — an
+// append-only data file will drift out of order eventually.
+const groups = [...byDate.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
+
+const fmt = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+---
+
+<div class="changelog">
+  {
+    groups.map(([date, entries]) => (
+      <section class="cl-group" aria-labelledby={`date-${date}`}>
+        <div class="cl-date">
+          <h2 id={`date-${date}`}>
+            <time datetime={date}>{fmt(date)}</time>
+          </h2>
+        </div>
+
+        <div class="cl-entries">
+          {entries.map((e) => (
+            <article class="cl-entry" id={e.id}>
+              <span class="cl-cat" data-cat={e.category}>{e.category}</span>
+              <h3>
+                {/* Title → the entry's own page (its own unfurl image).
+                    "#" → the in-page anchor, published before those pages
+                    existed and therefore kept working. */}
+                <a href={`/changelog/${e.id}/`} class="cl-anchor">
+                  {e.title}
+                </a>
+                <a href={`#${e.id}`} class="cl-hash" aria-label={`Link to “${e.title}” on this page`}>#</a>
+              </h3>
+              <p>{e.body}</p>
+              {e.docs && (
+                <p class="cl-docs">
+                  <a href={e.docs}>Read the docs →</a>
+                </p>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+    ))
+  }
+</div>
+
+<style>
+  .changelog {
+    --cl-rule: var(--sl-color-gray-5);
+    margin-top: 1.5rem;
+  }
+
+  .cl-group {
+    display: grid;
+    grid-template-columns: 12rem 1fr;
+    gap: 0 2rem;
+    align-items: start;
+  }
+
+  .cl-date h2 {
+    position: sticky;
+    top: 5rem;
+    margin: 0;
+    padding-top: 0.35rem;
+    font-size: var(--sl-text-lg);
+    color: var(--sl-color-gray-2);
+    border: none;
+  }
+
+  .cl-entries {
+    border-left: 1px solid var(--cl-rule);
+    padding-left: 2rem;
+    padding-bottom: 2.5rem;
+  }
+
+  .cl-entry {
+    position: relative;
+    /* Clear the sticky site header when jumped to via an anchor — otherwise a
+       shared link lands with the title hidden underneath it. */
+    scroll-margin-top: 6rem;
+    padding-bottom: 2rem;
+  }
+
+  .cl-entry::before {
+    content: "";
+    position: absolute;
+    left: calc(-2rem - 5px);
+    top: 0.75rem;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--sl-color-accent);
+  }
+
+  .cl-entry h3 {
+    margin: 0.35rem 0 0.5rem;
+    font-size: var(--sl-text-xl);
+    line-height: 1.3;
+  }
+
+  .cl-anchor {
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+  .cl-anchor:hover {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  /* Revealed on hover, and always reachable by keyboard focus — a hover-only
+     affordance is invisible to anyone not using a mouse.
+     The title goes to the entry's own page (its own unfurl image); the "#"
+     is the in-page anchor, kept because those URLs were published first. */
+  .cl-hash {
+    margin-left: 0.4rem;
+    color: var(--sl-color-accent);
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+  }
+  .cl-entry:hover .cl-hash,
+  .cl-hash:focus-visible {
+    opacity: 1;
+  }
+
+  /* A freshly-jumped-to entry gets a brief highlight, so a shared link makes it
+     obvious WHICH entry you were sent to on a long page. */
+  .cl-entry:target {
+    animation: cl-flash 2s ease-out;
+  }
+  @keyframes cl-flash {
+    from { background: var(--sl-color-accent-low); }
+    to { background: transparent; }
+  }
+
+  .cl-cat {
+    display: inline-block;
+    font-size: var(--sl-text-xs);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+    background: var(--sl-color-accent-low);
+    border-radius: 999px;
+    padding: 0.15rem 0.6rem;
+  }
+
+  .cl-entry p {
+    margin: 0.4rem 0 0;
+    color: var(--sl-color-gray-2);
+  }
+
+  .cl-docs {
+    margin-top: 0.6rem !important;
+    font-size: var(--sl-text-sm);
+  }
+
+  /* Single column on narrow screens: the date becomes a heading above its
+     entries rather than a 12rem column squeezing the text. */
+  @media (max-width: 50rem) {
+    .cl-group {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
+    .cl-date h2 {
+      position: static;
+      margin-bottom: 0.75rem;
+    }
+    .cl-entries {
+      border-left: none;
+      padding-left: 0;
+    }
+    .cl-entry::before {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .cl-entry:target { animation: none; outline: 2px solid var(--sl-color-accent); }
+    .cl-hash { transition: none; }
+  }
+</style>

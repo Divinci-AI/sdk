@@ -1,0 +1,145 @@
+---
+title: Embed Client Overview
+description: Drop-in chat widget for any website
+---
+
+
+The Divinci embed script (`embed-script.js`) is a zero-build drop-in chat widget. Add one `<script>` tag to any HTML page and a Divinci chat is mounted automatically — with optional toggleable UI, external-user login, A/B experiments, and feature flags.
+
+Unlike `@divinci-ai/client`, which is a headless TypeScript SDK you wire into your own UI, the embed script ships a fully-rendered chat iframe.
+
+## Features
+
+- One-line install — no bundler, no npm install
+- Toggleable floating chat or always-on iframe
+- Optional external-user login via JWT
+- Feature flags: metrics, help requests, notifications, context bubbles, message
+  feedback (thumbs up/down), quick menu, share-chat, product recommendations
+- A/B experiment assignment via data attributes
+- Auto-mounts on `window.load`; manual instantiation via the global
+
+See the [Reference](/embed/reference) for the exact attribute name and constructor
+option behind each flag.
+
+## Installation
+
+Add the script tag to any page where you want chat available:
+
+```html
+<script
+  src="https://assets.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+></script>
+```
+
+That's it. On page load the script mounts a default chat using the `divinci-release-id` you provided.
+
+### Configurable global key
+
+By default the script exposes a `window.DIVINCI_AI` global. If your site already uses that name, set `data-global-name`:
+
+```html
+<script
+  src="https://assets.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+  data-global-name="MY_CHAT"
+></script>
+
+<script>
+  // Access the same global under the custom key
+  window.MY_CHAT.DEFAULT_CHAT.ui?.openChat();
+</script>
+```
+
+## Minimum config
+
+A working minimum looks like:
+
+```html
+<script
+  src="https://assets.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+></script>
+```
+
+`divinci-release-id` is the only required attribute for auto-mount. Everything else is opt-in. Release IDs are alphanumeric, 8–64 characters; the script will warn in console if it doesn't look like a valid ID.
+
+## Toggleable vs. inline
+
+The default auto-mounted chat is **toggleable** — a floating launcher in the page corner that opens an overlay panel. To use an inline (always-visible) chat instead, mount it manually using `createChat()` and append the iframe to a container you control:
+
+```html
+<div id="chat-container"></div>
+
+<script src="https://assets.divinci.app/embed-script.js"></script>
+
+<script>
+  window.addEventListener("load", async () => {
+    const chat = window.DIVINCI_AI.createChat({
+      releaseId: "rel_your-release-id",
+      toggleable: false,
+    });
+    document.getElementById("chat-container").appendChild(chat.iframe);
+    await chat.waitForReady();
+  });
+</script>
+```
+
+When `toggleable: false`, no launcher UI renders — you control where the iframe lives.
+
+## External-user login
+
+If you authenticate your users yourself and want the chat to identify them, enable external login and pass a short-lived JWT:
+
+```html
+<script
+  src="https://assets.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+  divinci-external-user="YOUR_JWT_HERE"
+></script>
+```
+
+Pass `divinci-external-user="true"` (without a token) to enable the login flow but call `chat.auth.login(jwt)` from your JS once you have the token. See the [Reference](/embed/reference) for the auth API.
+
+## Enabling features
+
+Features are opt-in. As script-tag attributes, simply add the flag (its presence
+enables it; only `="false"` disables it):
+
+```html
+<script
+  src="https://assets.divinci.app/embed-script.js"
+  divinci-release-id="rel_your-release-id"
+  message-feedback
+  context-bubbles
+  share-chat
+></script>
+```
+
+The same flags exist as camelCase constructor options for manual mounts:
+
+```js
+const chat = window.DIVINCI_AI.createChat({
+  releaseId: "rel_your-release-id",
+  messageFeedback: true,
+  contextBubbles: true,
+  shareChat: true,
+});
+```
+
+`message-feedback` adds thumbs-up/down and a feedback dropdown on assistant
+replies. See the [Reference](/embed/reference#script-attributes-auto-mount) for the
+full flag list and each flag's exact attribute and option name.
+
+## Environment notes
+
+- **CSP:** the script loads an iframe from the Divinci embed origin. If you run a strict Content Security Policy, allow `script-src https://assets.divinci.app`, plus `frame-src` and `connect-src` for the Divinci embed and API hosts. Check your release's deployment domain in the Divinci dashboard.
+- **`cssSrc` for theming:** the iframe content is themed by passing a publicly-reachable stylesheet URL via the `css-src` attribute. Same-origin policy still applies to the iframe; theme via CSS variables exposed inside the embed app.
+- **No SSR:** the script reads `document.currentScript` and registers a `window.load` handler — it only runs in a real browser. If you render the snippet from a framework, ensure it lands in the browser-side HTML (not server-only output).
+
+## Next steps
+
+- [Reference](/embed/reference) — full attribute, config, and DivinciChat API
+- [Example Workers](/embed/examples) — copyable Cloudflare Worker starter
+  templates (anonymous + auth-required) with a live preset playground for
+  every feature flag

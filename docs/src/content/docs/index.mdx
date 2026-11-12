@@ -1,0 +1,126 @@
+---
+title: Divinci AI SDK
+description: Official SDKs for integrating Divinci AI into your applications
+template: splash
+hero:
+  tagline: Build powerful AI integrations with our official TypeScript SDKs
+  actions:
+    - text: Get Started
+      link: /getting-started/introduction
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/Divinci-AI/sdk
+      icon: external
+---
+
+import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+## See the whole pipeline
+
+New here? Follow **one PDF** from upload to a grounded answer — parsed,
+chunked, quizzed, embedded, routed, attacked, guarded, and served. Every stage
+is a real stage of the Divinci pipeline, and every tool named is one you can
+actually pick.
+
+<CardGrid>
+  <LinkCard
+    title="One document. The whole pipeline. →"
+    description="A scroll-through walkthrough of all seven stages, with the vendors you can choose at each one."
+    href="/pipeline"
+  />
+</CardGrid>
+
+## Bring your coding agent
+
+Building with Divinci in **Claude Code, Cursor, Gemini CLI, or Grok**? Install
+the **Divinci Agent Skill** — a drop-in package that teaches your agent the
+CLI, SDKs, and API (auth patterns, RAG ingestion, releases, the footguns) —
+and connect the hosted MCP server for live access to your account:
+
+```bash
+claude mcp add divinci --transport http https://mcp.divinci.app/mcp
+```
+
+<CardGrid>
+  <LinkCard
+    title="Install the Agent Skill"
+    description="One zip, works in Claude Code and any SKILL.md-compatible agent."
+    href="/guides/agent-skill/"
+  />
+  <LinkCard
+    title="Connect via MCP"
+    description="Give your assistant live access to workspaces, RAG, and releases."
+    href="/mcp/connect-assistant/"
+  />
+</CardGrid>
+
+## Choose Your SDK
+
+<div class="clickable-cards">
+<CardGrid stagger>
+  <Card title="Client SDK" icon="laptop">
+    Build custom chat UIs in React, Vue, or vanilla JavaScript with real-time streaming.
+
+    [Learn more →](/client/overview)
+  </Card>
+
+  <Card title="Server SDK" icon="node">
+    Manage workspaces, releases, and RAG documents from your Node.js backend.
+
+    [Learn more →](/server/overview)
+  </Card>
+
+  <Card title="MCP SDK" icon="puzzle">
+    Integrate with Claude Desktop, Cursor, and other MCP-compatible AI assistants.
+
+    [Learn more →](/mcp/overview)
+  </Card>
+
+  <Card title="Embed Script" icon="rocket">
+    Drop a fully-rendered chat widget onto any page with one `<script>` tag — no bundler required.
+
+    [Learn more →](/embed/overview)
+  </Card>
+
+  <Card title="CLI" icon="seti:shell">
+    Manage workspaces, chat with AI, search knowledge bases, and control releases from your terminal.
+
+    [View CLI docs →](/cli/overview)
+  </Card>
+
+  <Card title="TypeScript First" icon="seti:typescript">
+    Full TypeScript support with auto-generated types from our OpenAPI spec.
+
+    [View API reference →](https://divinci.ai/api/)
+  </Card>
+</CardGrid>
+</div>
+
+## Quick Example
+
+```typescript
+import { DivinciClient } from "@divinci-ai/client";
+
+const client = new DivinciClient({
+  releaseId: "rel_abc123",
+  apiKey: "divinci_key_...",
+});
+
+// Open a thread, then stream a response token-by-token
+const thread = await client.chat.create();
+
+await client.chat.stream(thread.id, "Tell me about AI", {
+  assistantName: "your-assistant-id", // the release's assistant/model id
+  onChunk: (text) => process.stdout.write(text),
+  onComplete: (message) => console.log("\n\nDone:", message.id),
+});
+```
+
+## Example projects
+
+- [**Divinci-AI/drfuhrman-ai-landing**](https://github.com/Divinci-AI/drfuhrman-ai-landing)
+  — a production marketing site with a gated, anonymous AI chat, built on
+  **Cloudflare Workers** (Astro static frontend + a Worker that proxies to a
+  Divinci [Release](/server/releases/)). Walk through the pattern in
+  [Deploy to Cloudflare Workers](/guides/cloudflare-workers/).

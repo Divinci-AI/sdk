@@ -1,0 +1,153 @@
+---
+title: Divinci Docs
+description: Turn a documentation site into an AI assistant — crawl it into a Release and embed the widget, or generate a whole Starlight site with the assistant already wired in.
+---
+
+import { Aside, Steps, Tabs, TabItem } from "@astrojs/starlight/components";
+
+**Divinci Docs** turns documentation into an assistant your readers can ask.
+It crawls a docs site into a RAG vector, binds that vector to a Release, and
+gives you the embed snippet — or generates the entire docs site for you with
+the assistant already in it.
+
+This site runs on it.
+
+## How this site does it
+
+sdk.divinci.ai is the dogfood: the docs you are reading are built **with the SDK
+they document**. Worth knowing because it is deliberately *not* the embed
+snippet described below.
+
+- The assistant is a **Starlight-native chat panel**
+  (`src/components/DocsAssistant.astro`, mounted through the Footer override),
+  not an iframe widget. It renders inside the page's own layout and inherits the
+  site theme.
+- It talks to a Divinci Release through **`@divinci-ai/client`** — the same
+  package documented under [Client SDK](/client/overview/). No embed script, no
+  cross-origin frame.
+- It is configured entirely at **build time**, from three public env vars:
+  `PUBLIC_DIVINCI_API_URL`, `PUBLIC_DIVINCI_RELEASE_ID` and `PUBLIC_SITE_URL`.
+  Leave them unset and the panel **no-ops** — which is what makes local builds
+  and preview deploys safe by default rather than by remembering to disable
+  something.
+
+The trade is straightforward. The embed snippet works on any site and survives a
+host you do not control. Mounting the client SDK directly costs you a component
+but gives you the page's own styling, routing and layout — worth it when you own
+the site, which is the case here.
+
+<Aside type="tip" title="`PUBLIC_SITE_URL` is not cosmetic">
+It sets the canonical origin for the sitemap. A hardcoded production URL once
+made *staging* builds emit a sitemap listing sdk.divinci.ai pages, which made
+crawling staging with `runSitemap` useless — the crawler kept being pointed back
+at production. Set it to the origin you are actually deploying.
+</Aside>
+
+## Two modes, and picking the wrong one costs a rebuild
+
+<Tabs>
+<TabItem label="Mode A — you have a docs site">
+
+You already publish docs somewhere. Divinci crawls the live site.
+
+```bash
+divinci docs add https://docs.example.com --name "Docs Assistant"
+```
+
+That provisions a Release from the canonical Divinci Docs template, crawls the
+URL into its vector, and prints the embed snippet. Add the snippet to your
+existing site and you are done.
+
+</TabItem>
+<TabItem label="Mode B — you have a repo">
+
+You have a README and a `docs/` directory and no site yet. Divinci generates a
+[Starlight](https://starlight.astro.build/) site from them, with the assistant
+already wired in.
+
+```bash
+divinci docs generate ./my-project --out ./docs-site --title "My Project"
+```
+
+Useful flags:
+
+| flag | why |
+|---|---|
+| `--release-id <id>` | bind the assistant now; otherwise set it later via env |
+| `--self-host` | vendor the widget bundle so the site deploys without the npm package |
+| `--web-app-url <url>` | where "sign up" hands off to |
+
+</TabItem>
+</Tabs>
+
+The difference is which artifact you own afterwards. Mode A leaves your site
+untouched and adds a widget. Mode B produces a site you now maintain.
+
+## The embed snippet
+
+Already have a Release and just want the markup:
+
+```bash
+divinci docs snippet <releaseId> --kind npm      # or: script | astro
+```
+
+Pick `--kind` to match how your site loads JavaScript — `astro` for a
+Starlight/Astro site, `script` for a plain tag, `npm` for a bundler.
+
+<Aside type="tip" title="Blocked hosts">
+Some documentation hosts strip third-party script tags. If the widget never
+appears, read [When your host blocks the embed
+script](/guides/embed-blocked-host/) before debugging your Release.
+</Aside>
+
+## Keeping the assistant current
+
+<Aside type="caution" title="`sync` reports; it does not re-ingest">
+`divinci docs sync` lists which docs changed since a git ref. It **does not**
+update the Release's knowledge base, and its `--vector` flag is accepted and
+ignored — it exists for flag compatibility only.
+
+Reading it as a refresh command is the mistake to avoid: your docs move, the
+command exits cleanly, and the assistant keeps answering from the corpus it
+had months ago. Nothing errors.
+</Aside>
+
+```bash
+# What changed since the last commit? (report only)
+divinci docs sync --since HEAD~1 --base-url https://docs.example.com
+
+# Actually refresh the published Release's knowledge base
+divinci connectors web-crawl https://docs.example.com \
+  --vector <vectorId> --swap --recurring
+```
+
+`--swap` is the part that matters. The new crawl is built alongside the live
+vector and swapped in only on success, so a failed re-crawl leaves readers
+with the previous corpus instead of an empty one. `--recurring` schedules it.
+
+## Reusing a configuration
+
+A Release you have tuned — model, retrieval settings, prompt, theme — can be
+exported as a portable template and cloned elsewhere:
+
+```bash
+divinci docs template export <releaseId> > docs-template.json
+divinci release clone <releaseId> --to-workspace <workspaceId>
+```
+
+The export strips ids, vector bindings and content, so what travels is the
+configuration rather than the corpus. Import is `release clone`, not a
+separate command.
+
+## What it costs, before you commit
+
+Crawling and embedding bill against your wallet. Both are estimable first:
+
+```bash
+divinci rag estimate <files...>     # uploads nothing
+```
+
+And the crawl obeys the usual rules — see the [RAG knowledge
+base](/server/rag/) docs for scoping a crawl with `--include-paths` /
+`--exclude-paths` and a page budget rather than pointing it at a domain root
+and hoping.
